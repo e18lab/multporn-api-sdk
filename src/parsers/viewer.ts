@@ -108,6 +108,7 @@ export function parseInlineJuiceboxFromHtml(html: string): ViewerImage[] {
   return out;
 }
 
+
 function parseBreadcrumbs(html: string, baseURL: string): LinkItem[] {
   const block = textBetween(html, /<div[^>]+class="breadcrumb"[^>]*>/i, '</div>');
   return block ? collectLinks(block, baseURL) : [];
@@ -190,6 +191,8 @@ export function parseViewerMeta(
   const authors = parseLinksFromLabeledField(html, baseURL, 'Author');
   const sections = parseLinksFromLabeledField(html, baseURL, 'Section');
   const tags = parseLinksFromLabeledField(html, baseURL, 'Tags');
+  const characters = parseLinksFromLabeledField(html, baseURL, 'Characters');
+  const userTags = parseLinksFromLabeledField(html, baseURL, 'User tags');
   const { rating, votes } = parseVotesAndRating(html);
   const views = parseViews(html);
 
@@ -205,6 +208,8 @@ export function parseViewerMeta(
     authors,
     sections,
     tags,
+    characters,
+    userTags,
     rating,
     votes,
     views,
@@ -222,6 +227,47 @@ function findCanonicalUrl(html: string, baseURL: string): string {
   return baseURL.replace(/\/+$/, '');
 }
 
+const EXCLUDE_URL_PATTERNS: RegExp[] = [
+  /\/styles\/avatars\//i,
+  /\/user_avatars\//i,
+  /\/default_images\//i,
+  /\/styles\/taxonomy_(?:comics|manga)\//i,
+  /\/com_preview\//i,
+  /\/promo\//i,
+];
+
+function isExcludedUrl(u: string): boolean {
+  const s = String(u);
+  return EXCLUDE_URL_PATTERNS.some((re) => re.test(s));
+}
+
+function stripExcludedBlocks(html: string): string {
+  const patterns: RegExp[] = [
+    /<div[^>]+id="comments"[^>]*>[\s\S]*?<\/div>/gi,
+    /<section[^>]+id="comments"[^>]*>[\s\S]*?<\/section>/gi,
+    /<div[^>]+class="[^"]*\bcomments?\b[^"]*"[^>]*>[\s\S]*?<\/div>/gi,
+    /<div[^>]+class="[^"]*\bcomment\b[^"]*"[^>]*>[\s\S]*?<\/div>/gi,
+    /<ul[^>]+class="[^"]*\bcomment\b[^"]*"[^>]*>[\s\S]*?<\/ul>/gi,
+
+    /<div[^>]+class="[^"]*\brelated\b[^"]*"[^>]*>[\s\S]*?<\/div>/gi,
+    /<div[^>]+class="[^"]*\bmore\b[^"]*"[^>]*>[\s\S]*?<\/div>/gi,
+    /<div[^>]+class="[^"]*\bmore-comics\b[^"]*"[^>]*>[\s\S]*?<\/div>/gi,
+    /<div[^>]+class="[^"]*\bpane-related\b[^"]*"[^>]*>[\s\S]*?<\/div>/gi,
+    /<div[^>]+class="[^"]*\bsimilar\b[^"]*"[^>]*>[\s\S]*?<\/div>/gi,
+
+    /<aside[\s\S]*?<\/aside>/gi,
+    /<div[^>]+class="[^"]*\bsidebar\b[^"]*"[^>]*>[\s\S]*?<\/div>/gi,
+    /<div[^>]+class="[^"]*\bnode-footer\b[^"]*"[^>]*>[\s\S]*?<\/div>/gi,
+
+    /<div[^>]+class="[^"]*\bpane-views\b[^"]*"[^>]*>[\s\S]*?<\/div>/gi,
+    /<div[^>]+class="[^"]*\bpane-taxonomy\b[^"]*"[^>]*>[\s\S]*?<\/div>/gi,
+  ];
+
+  let cleaned = html;
+  for (const re of patterns) cleaned = cleaned.replace(re, '');
+  return cleaned;
+}
+
 function collectImgSrcs(html: string): string[] {
   const out: string[] = [];
   const re = /<img[^>]+src=["']([^"']+)["'][^>]*>/gi;
@@ -230,12 +276,16 @@ function collectImgSrcs(html: string): string[] {
   return out;
 }
 
+function collectContentImages(html: string): string[] {
+  const cleaned = stripExcludedBlocks(html);
+  return collectImgSrcs(cleaned).filter((u) => !!u && !isExcludedUrl(u));
+}
+
 export function parseViewer(
   html: string,
   baseURL: string,
 ): { meta: ViewerMeta; images: ViewerImage[] } {
   const absoluteUrl = findCanonicalUrl(html, baseURL);
-
   const { meta } = parseViewerMeta(html, baseURL, absoluteUrl);
 
   const inline: ViewerImage[] = parseInlineJuiceboxFromHtml(html)
@@ -253,9 +303,10 @@ export function parseViewer(
 
   let fallback: ViewerImage[] = [];
   if (inline.length === 0) {
-    const srcs = collectImgSrcs(html)
+    const srcs = collectContentImages(html)
       .map((u) => toAbsolute(baseURL, u) || '')
       .filter((u) => !!u);
+
     const seen = new Set<string>();
     fallback = srcs
       .filter((u) => {

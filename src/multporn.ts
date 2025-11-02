@@ -11,6 +11,7 @@ import {
   ViewerResult,
   ResolveOptions,
   ResolvedRoute,
+  ListingQuery,
 } from './types';
 import { SearchAPI, UpdatesAPI, PostsAPI, ListingsAPI, AlphabetAPI, ViewerAPI } from './api/index';
 export { parseHubListing as parseListing } from './parsers/listing';
@@ -26,33 +27,46 @@ export class MultpornClient {
     this.baseURL = (opts.baseURL ?? 'https://multporn.net').replace(/\/+$/, '');
     this.http = new HttpClient({ ...opts, baseURL: this.baseURL });
   }
-  latest(page = 0): Promise<Page<ListingItem>> {
-    return ListingsAPI.latest(this.http, this.baseURL, page);
+
+  latest(page = 0, params?: ListingQuery): Promise<Page<ListingItem>> {
+    return ListingsAPI.latest(this.http, this.baseURL, page, params);
   }
-  listByPath(path: string, page = 0): Promise<Page<ListingItem>> {
-    return ListingsAPI.listByPath(this.http, this.baseURL, path, page);
+
+  listByPath(
+    path: string,
+    page = 0,
+    params?: ListingQuery & { letter?: string },
+  ): Promise<Page<ListingItem>> {
+    return ListingsAPI.listByPath(this.http, this.baseURL, path, page, params);
   }
+
   search(query: string, page = 0): Promise<Page<ListingItem>> {
     return SearchAPI.search(this.http, this.baseURL, query, page);
   }
+
   getPost(urlOrSlug: string): Promise<Post> {
     return PostsAPI.getPost(this.http, this.baseURL, urlOrSlug);
   }
+
   resolve(urlOrSlug: string, opts: ResolveOptions = {}): Promise<ViewerResult> {
     return ViewerAPI.resolveViewer(this.http, this.baseURL, urlOrSlug, opts);
   }
+
   resolveSmart(urlOrSlug: string, opts: ResolveOptions = {}): Promise<ResolvedRoute> {
     return ViewerAPI.resolveSmart(this.http, this.baseURL, urlOrSlug, opts);
   }
+
   updates(params: MultpornUpdatesParams = {}): Promise<UpdatesResult> {
     return UpdatesAPI.updates(this.http, this.baseURL, params);
   }
+
   viewUpdates(
     viewName: ViewName,
     params?: Omit<MultpornUpdatesParams, 'view_name'>,
   ): Promise<UpdatesResult> {
     return this.updates({ ...(params ?? {}), view_name: viewName });
   }
+
   updatesNewMini(p?: Omit<MultpornUpdatesParams, 'view_name'>) {
     return UpdatesAPI.updates(this.http, this.baseURL, { ...(p ?? {}), view_name: 'new_mini' });
   }
@@ -92,6 +106,7 @@ export class MultpornClient {
       view_name: 'top_random_characters',
     });
   }
+
   alphabetLetters(section: AlphabetSection): Promise<AlphabetLetter[]> {
     return AlphabetAPI.alphabetLetters(this.http, this.baseURL, section);
   }

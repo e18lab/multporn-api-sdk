@@ -89,12 +89,18 @@ function unwrapMediaUrl(u) {
         maybe.searchParams.get('src');
       if (inner) {
         v = inner;
-        try { v = decodeURIComponent(v); } catch {}
-        try { v = decodeURIComponent(v); } catch {}
+        try {
+          v = decodeURIComponent(v);
+        } catch {}
+        try {
+          v = decodeURIComponent(v);
+        } catch {}
         continue;
       }
     } catch {
-      try { v = decodeURIComponent(v); } catch {}
+      try {
+        v = decodeURIComponent(v);
+      } catch {}
     }
     break;
   }
@@ -149,7 +155,6 @@ function withProxiedRecs(obj) {
     recommendations: obj.recommendations.map((r) => ({ ...r, proxiedThumb: proxyImg(r.thumb) })),
   };
 }
-
 function guessSectionFromPath(pathname = '') {
   if (/^\/munga(?:\/|$)/i.test(pathname)) return 'manga';
   if (/^\/comic(?:\/|$)/i.test(pathname)) return 'comics';
@@ -162,7 +167,131 @@ function guessSectionFromPath(pathname = '') {
   return 'comics';
 }
 
-// ---------------------- Home ----------------------
+function extractViewFiltersBlock(html) {
+  const openRe = /<div[^>]+class=["'][^"']*view-filters[^"']*["'][^>]*>/i;
+  const m = openRe.exec(html);
+  if (!m) return '';
+  let i = m.index + m[0].length;
+  let depth = 1;
+  while (i < html.length && depth > 0) {
+    const nextOpen = html.indexOf('<div', i);
+    const nextClose = html.indexOf('</div>', i);
+    if (nextClose < 0) break;
+    if (nextOpen >= 0 && nextOpen < nextClose) {
+      depth++;
+      i = nextOpen + 4;
+      continue;
+    }
+    depth--;
+    i = nextClose + 6;
+  }
+  return html.slice(m.index, i);
+}
+function extractLabelFor(block, forId) {
+  if (!forId) return null;
+  const re = new RegExp(`<label[^>]*for=["']${forId}["'][^>]*>([\\s\\S]*?)<\\/label>`, 'i');
+  const m = re.exec(block);
+  if (!m) return null;
+  return m[1]
+    .replace(/<[^>]*>/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+function extractSelects(block) {
+  const out = [];
+  const reSel =
+    /<select[^>]*\bname=["']([^"']+)["'][^>]*\bid=["']?([^"'\s>]+)["']?[^>]*>([\s\S]*?)<\/select>/gi;
+  let sm;
+  while ((sm = reSel.exec(block))) {
+    const name = sm[1];
+    const id = sm[2];
+    const inner = sm[3] || '';
+    const label = extractLabelFor(block, id) || undefined;
+
+    const opts = [];
+    const reOpt = /<option[^>]*\bvalue=["']([^"']*)["'][^>]*>([\s\S]*?)<\/option>/gi;
+    let om;
+    while ((om = reOpt.exec(inner))) {
+      const value = om[1];
+      const rawLabel = (om[2] || '')
+        .replace(/<[^>]*>/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      const selected = /\bselected\b/i.test(om[0]);
+      opts.push({ value, label: rawLabel, selected });
+    }
+    out.push({ name, label, options: opts });
+  }
+  return out;
+}
+async function fetchSortingForListing(listingUrl, queryParams = {}) {
+  const urlObj = new URL(listingUrl, ORIGIN);
+  for (const [k, v] of Object.entries(queryParams)) {
+    if (v === undefined || v === null || v === '') continue;
+    urlObj.searchParams.set(k, String(v));
+  }
+  const finalUrl = urlObj.toString();
+  const r = await fetch(finalUrl, { headers: { 'user-agent': 'Mozilla/5.0', referer: ORIGIN } });
+  const html = await r.text();
+  const block = extractViewFiltersBlock(html);
+  if (!block) return null;
+
+  const selects = extractSelects(block);
+  if (!selects.length) return null;
+
+  const resp = {
+    hasSorting: false,
+    sort_by: null,
+    sort_order: null,
+    filters: [],
+    actionPath: (() => {
+      const fm = /<form[^>]*\baction=["']([^"']+)["'][^>]*>/i.exec(block);
+      return fm?.[1] || urlObj.pathname;
+    })(),
+  };
+
+  for (const sel of selects) {
+    if (sel.name === 'sort_by') {
+      resp.hasSorting = true;
+      resp.sort_by = sel;
+    } else if (sel.name === 'sort_order') {
+      resp.hasSorting = true;
+      resp.sort_order = sel;
+    } else {
+      resp.filters.push(sel);
+    }
+  }
+  if (!resp.sort_by && !resp.sort_order && !resp.filters.length) return null;
+  return resp;
+}
+function pickSortingParams(q) {
+  const out = {};
+  for (const k of Object.keys(q)) {
+    const v = q[k];
+    if (v === undefined || v === null || v === '') continue;
+    if (['path', 'url', 'page', 'letter'].includes(k)) continue;
+    out[k] = String(v);
+  }
+  return out;
+}
+function buildQuery(obj) {
+  const sp = new URLSearchParams();
+  Object.entries(obj || {}).forEach(([k, v]) => {
+    if (v === undefined || v === null || v === '') return;
+    sp.set(k, String(v));
+  });
+  const s = sp.toString();
+  return s ? '?' + s : '';
+}
+function mergeParams(base, extra) {
+  const out = new URLSearchParams(base || '');
+  Object.entries(extra || {}).forEach(([k, v]) => {
+    if (v === undefined || v === null || v === '') out.delete(k);
+    else out.set(k, String(v));
+  });
+  return out.toString();
+}
+
 app.get('/', (req, res) => {
   res
     .type('html')
@@ -215,18 +344,42 @@ app.get(
     if (!sdkClient) throw new Error('SDK not loaded');
     const path = pathFromQuery({ path: req.query.path, url: req.query.url });
     const page = Number(req.query.page ?? '0');
+    const letter = req.query.letter ? String(req.query.letter) : undefined;
 
-    const raw = path === '/' ? await sdkClient.latest(page) : await sdkClient.listByPath(path, page);
+    const exposed = pickSortingParams(req.query);
+    const sdkOpts = { ...(letter ? { letter } : {}), ...exposed };
+
+    const raw =
+      path === '/'
+        ? await sdkClient.latest(page, sdkOpts)
+        : await sdkClient.listByPath(path, page, sdkOpts);
     const data = withProxiedThumbs(raw);
 
-    const url = req.query.url ? String(req.query.url) : new URL(path, ORIGIN).toString();
-    const first = Array.isArray(data?.items) && data.items.length ? data.items[0].url : undefined;
+    const canonicalUrl = req.query.url ? String(req.query.url) : new URL(path, ORIGIN).toString();
+    const sp = new URLSearchParams(exposed);
+    const listedUrl = canonicalUrl + (sp.toString() ? '?' + sp.toString() : '');
 
+    let sorting = null;
+    try {
+      sorting = await fetchSortingForListing(canonicalUrl, exposed);
+    } catch {}
+
+    const first = Array.isArray(data?.items) && data.items.length ? data.items[0].url : undefined;
     const links = {
-      ...linksFor(url),
+      ...linksFor(canonicalUrl),
       previewFirstItem: first ? '/viewer?url=' + encodeURIComponent(first) : undefined,
+      listSelf:
+        '/api/list?' +
+        mergeParams(
+          new URLSearchParams({
+            url: canonicalUrl,
+            page: String(page),
+            ...(letter ? { letter } : {}),
+          }).toString(),
+          exposed,
+        ),
     };
-    res.json({ ...data, links });
+    res.json({ ...data, sorting, links, sourceUrl: listedUrl });
   }),
 );
 
@@ -306,8 +459,11 @@ app.get(
     const path = pathFromQuery({ path: req.query.path, url: req.query.url });
     const title = 'Hub ' + (incomingUrl || path);
 
+    const exposed = pickSortingParams(req.query);
+
     let data;
     let letters = [];
+    let listingCanonicalUrl = incomingUrl ? String(incomingUrl) : new URL(path, ORIGIN).toString();
 
     if (incomingUrl) {
       const resolved = await sdkClient.resolveSmart(incomingUrl, {
@@ -320,8 +476,26 @@ app.get(
         return;
       }
 
-      data = withProxiedThumbs(resolved.data);
-      if (resolved.data?.alphabet?.letters?.length) {
+      const listingPath =
+        resolved?.data?.path ||
+        (() => {
+          try {
+            return new URL(incomingUrl).pathname;
+          } catch {
+            return path;
+          }
+        })();
+
+      const pageData = await sdkClient.listByPath(listingPath, page, {
+        ...(letter ? { letter } : {}),
+        ...exposed,
+      });
+      data = withProxiedThumbs(pageData);
+
+      listingCanonicalUrl = new URL(listingPath, ORIGIN).toString();
+      if (pageData?.alphabet?.letters?.length) {
+        letters = pageData.alphabet.letters;
+      } else if (resolved?.data?.alphabet?.letters?.length) {
         letters = resolved.data.alphabet.letters;
       }
     } else {
@@ -329,19 +503,73 @@ app.get(
         const section = guessSectionFromPath(path);
         data = await sdkClient.alphabet(section, letter, page);
       } else {
-        data = path === '/' ? await sdkClient.latest(page) : await sdkClient.listByPath(path, page);
+        data =
+          path === '/'
+            ? await sdkClient.latest(page, exposed)
+            : await sdkClient.listByPath(path, page, exposed);
       }
       data = withProxiedThumbs(data);
+      listingCanonicalUrl = new URL(path, ORIGIN).toString();
 
       if (data?.alphabet?.letters?.length) {
         letters = data.alphabet.letters;
       } else if (letter) {
-        const hub0 = await sdkClient.listByPath(path, 0);
+        const hub0 = await sdkClient.listByPath(path, 0, exposed);
         if (hub0?.alphabet?.letters?.length) {
           letters = hub0.alphabet.letters;
         }
       }
     }
+
+    let sorting = null;
+    try {
+      sorting = await fetchSortingForListing(listingCanonicalUrl, exposed);
+    } catch {}
+
+    const paramsForRaw = new URLSearchParams(exposed).toString();
+    const rawHtmlHref =
+      '/raw?url=' +
+      encodeURIComponent(listingCanonicalUrl + (paramsForRaw ? '?' + paramsForRaw : ''));
+    const rawJsonHref =
+      '/api/list?' +
+      mergeParams(
+        new URLSearchParams({
+          url: listingCanonicalUrl,
+          page: String(page),
+          ...(letter ? { letter } : {}),
+        }).toString(),
+        exposed,
+      );
+
+    function renderSelect(sel) {
+      if (!sel) return '';
+      const opts = (sel.options || [])
+        .map((o) => {
+          const selected = o.selected ? ' selected' : '';
+          return `<option value="${escapeAttr(o.value)}"${selected}>${escapeHtml(o.label || o.value)}</option>`;
+        })
+        .join('');
+      return `
+        <label class="lbl" for="sel-${escapeAttr(sel.name)}">${escapeHtml(sel.label || sel.name)}</label>
+        <select id="sel-${escapeAttr(sel.name)}" name="${escapeAttr(sel.name)}" class="form-select">
+          ${opts}
+        </select>`;
+    }
+
+    const sortBarHtml = sorting
+      ? `<form class="sortbar" method="GET" action="/hub" id="sortForm">
+          ${
+            incomingUrl
+              ? `<input type="hidden" name="url" value="${escapeAttr(incomingUrl)}"/>`
+              : `<input type="hidden" name="path" value="${escapeAttr(path)}"/>`
+          }
+          ${letter ? `<input type="hidden" name="letter" value="${escapeAttr(letter)}"/>` : ''}
+          ${renderSelect(sorting.sort_by)}
+          ${renderSelect(sorting.sort_order)}
+          ${Array.isArray(sorting.filters) ? sorting.filters.map(renderSelect).join('') : ''}
+          <button class="btn" type="submit">Apply</button>
+        </form>`
+      : '';
 
     const itemsHtml = (Array.isArray(data?.items) ? data.items : [])
       .map((it) => {
@@ -349,7 +577,7 @@ app.get(
         const t = it.title || '';
         const u = it.url || '';
         return (
-          '<a class="card" href="/hub?url=' +
+          '<a class="card nav" href="/hub?url=' +
           encodeURIComponent(u) +
           '">' +
           (img ? '<img src="' + escapeAttr(String(img)) + '" alt="">' : '') +
@@ -365,8 +593,15 @@ app.get(
       .map((l) => {
         const lab = l.label || l.value || '';
         const val = l.value || lab;
-        const href = '/hub?path=' + encodeURIComponent(path) + '&letter=' + encodeURIComponent(val);
-        const cls = l.active ? ' class="a active"' : ' class="a"';
+        const base = l.href
+          ? '/hub?url=' + encodeURIComponent(abs(l.href, ORIGIN))
+          : '/hub?path=' + encodeURIComponent(path);
+        const params = {
+          ...(l.href ? {} : { letter: val }),
+          ...exposed,
+        };
+        const href = base + buildQuery(params);
+        const cls = l.active ? ' class="a active nav"' : ' class="a nav"';
         return '<a' + cls + ' href="' + escapeAttr(href) + '">' + escapeHtml(lab) + '</a>';
       })
       .join('');
@@ -376,17 +611,19 @@ app.get(
     const hasPrev = page > 0;
     const hasNext = !!data?.hasNext && page + 1 < totalPages;
 
-    const queryBase =
-      '/hub?' +
-      (incomingUrl ? 'url=' + encodeURIComponent(incomingUrl) : 'path=' + encodeURIComponent(path)) +
-      (letter ? '&letter=' + encodeURIComponent(letter) : '') +
-      '&page=';
+    const baseParams = {
+      ...(incomingUrl ? { url: incomingUrl } : { path }),
+      ...(letter ? { letter } : {}),
+      ...exposed,
+    };
 
     const pagerHtml =
       totalPages > 1
         ? '<div class="pager">' +
           (hasPrev
-            ? '<a class="btn" href="' + escapeAttr(queryBase + String(page - 1)) + '">Prev</a>'
+            ? '<a class="btn nav" href="' +
+              escapeAttr('/hub' + buildQuery({ ...baseParams, page: page - 1 })) +
+              '">Prev</a>'
             : '') +
           '<span class="muted">Page ' +
           String(page + 1) +
@@ -394,45 +631,65 @@ app.get(
           String(totalPages) +
           '</span>' +
           (hasNext
-            ? '<a class="btn" href="' + escapeAttr(queryBase + String(page + 1)) + '">Next</a>'
+            ? '<a class="btn nav" href="' +
+              escapeAttr('/hub' + buildQuery({ ...baseParams, page: page + 1 })) +
+              '">Next</a>'
             : '') +
           '</div>'
         : '';
 
-    res
-      .type('html')
-      .send(
-        '<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>' +
-          '<title>' +
-          escapeHtml(title) +
-          '</title>' +
-          '<style>' +
-          'body{margin:0;background:#0e1117;color:#e6edf3;font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Helvetica,Arial}' +
-          'a{color:#58a6ff;text-decoration:none}' +
-          'header{position:sticky;top:0;padding:12px 16px;background:rgba(22,27,34,.9);backdrop-filter:saturate(180%) blur(10px);border-bottom:1px solid rgba(255,255,255,.06);z-index:10}' +
-          'header h1{margin:0;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
-          '.wrap{max-width:1200px;margin:16px auto;padding:0 16px}' +
-          '.alpha{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 12px 0}' +
-          '.alpha .a{display:inline-block;padding:6px 10px;border:1px solid rgba(255,255,255,.08);border-radius:8px;background:#161b22;color:#e6edf3}' +
-          '.alpha .a.active{border-color:#58a6ff}' +
-          '.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px}' +
-          '.card{display:block;background:#161b22;border:1px solid rgba(255,255,255,.08);border-radius:10px;overflow:hidden}' +
-          '.card img{width:100%;height:180px;object-fit:cover;display:block}' +
-          '.card .t{padding:10px;color:#e6edf3;font-size:13px}' +
-          '.pager{display:flex;gap:12px;align-items:center;justify-content:center;margin:14px 0}' +
-          '.btn{padding:8px 12px;border-radius:8px;border:1px solid rgba(255,255,255,.12);background:#21262d;color:#e6edf3}' +
-          '.muted{color:#8b949e}' +
-          '</style></head><body>' +
-          '<header><h1>' +
-          escapeHtml(title) +
-          '</h1></header>' +
-          '<div class="wrap">' +
-          (alphaHtml ? '<div class="alpha">' + alphaHtml + '</div>' : '') +
-          (itemsHtml ? '<div class="grid">' + itemsHtml + '</div>' : '<p>No items.</p>') +
-          pagerHtml +
-          '</div>' +
-          '</body></html>',
-      );
+    res.type('html').send(
+      '<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>' +
+        '<title>' +
+        escapeHtml(title) +
+        '</title>' +
+        '<style>' +
+        'body{margin:0;background:#0e1117;color:#e6edf3;font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Helvetica,Arial}' +
+        'a{color:#58a6ff;text-decoration:none}' +
+        'header{position:sticky;top:0;padding:10px 16px;background:rgba(22,27,34,.9);backdrop-filter:saturate(180%) blur(10px);border-bottom:1px solid rgba(255,255,255,.06);z-index:20;display:flex;align-items:center;gap:12px}' +
+        'header h1{margin:0;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}' +
+        '.actions{display:flex;gap:8px;align-items:center}' +
+        '.act{padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.12);background:#21262d;color:#e6edf3;font-size:12px}' +
+        '.wrap{max-width:1200px;margin:16px auto;padding:0 16px}' +
+        '.sortbar{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;margin:8px 0 12px 0;padding:8px;background:#111822;border:1px solid rgba(255,255,255,.06);border-radius:10px}' +
+        '.sortbar .lbl{display:block;font-size:12px;color:#8b949e;margin:0 0 4px 2px}' +
+        '.sortbar .form-select{padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.12);background:#161b22;color:#e6edf3}' +
+        '.alpha{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 12px 0}' +
+        '.alpha .a{display:inline-block;padding:6px 10px;border:1px solid rgba(255,255,255,.08);border-radius:8px;background:#161b22;color:#e6edf3}' +
+        '.alpha .a.active{border-color:#58a6ff}' +
+        '.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px}' +
+        '.card{display:block;background:#161b22;border:1px solid rgba(255,255,255,.08);border-radius:10px;overflow:hidden}' +
+        '.card img{width:100%;height:180px;object-fit:cover;display:block}' +
+        '.card .t{padding:10px;color:#e6edf3;font-size:13px}' +
+        '.pager{display:flex;gap:12px;align-items:center;justify-content:center;margin:14px 0}' +
+        '.btn{padding:8px 12px;border-radius:8px;border:1px solid rgba(255,255,255,.12);background:#21262d;color:#e6edf3}' +
+        '.btn.muted{background:#171b21;color:#8b949e;border-color:rgba(255,255,255,.08)}' +
+        '.muted{color:#8b949e}' +
+        '#loading{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;align-items:center;justify-content:center;z-index:9999}' +
+        '.spinner{width:44px;height:44px;border-radius:50%;border:3px solid rgba(255,255,255,.2);border-top-color:#58a6ff;animation:sp 1s linear infinite}@keyframes sp{to{transform:rotate(360deg)}}' +
+        '</style></head><body>' +
+        '<header><h1>' +
+        escapeHtml(title) +
+        '</h1><div class="actions">' +
+        `<a class="act" href="${escapeAttr(rawJsonHref)}" target="_blank">RAW JSON</a>` +
+        `<a class="act" href="${escapeAttr(rawHtmlHref)}" target="_blank">RAW HTML</a>` +
+        '</div></header>' +
+        '<div class="wrap">' +
+        (sorting ? sortBarHtml : '') +
+        (alphaHtml ? '<div class="alpha">' + alphaHtml + '</div>' : '') +
+        (itemsHtml ? '<div class="grid">' + itemsHtml + '</div>' : '<p>No items.</p>') +
+        pagerHtml +
+        '</div>' +
+        '<div id="loading"><div class="spinner"></div></div>' +
+        '<script>(function(){' +
+        'var L=document.getElementById("loading");' +
+        'function show(){if(L)L.style.display="flex"}function hide(){if(L)L.style.display="none"}' +
+        'var sf=document.getElementById("sortForm"); if(sf){sf.addEventListener("submit",function(){show()})}' +
+        'document.addEventListener("click",function(e){var a=e.target.closest("a.nav"); if(a){show()}});' +
+        'window.addEventListener("pageshow",hide); window.addEventListener("load",hide);' +
+        '})();</script>' +
+        '</body></html>',
+    );
   }),
 );
 
@@ -494,6 +751,9 @@ app.get(
       ? resolved.data.recommendations
       : [];
 
+    const rawJsonHref = '/api/resolve?url=' + encodeURIComponent(url);
+    const rawHtmlHref = '/raw?url=' + encodeURIComponent(url);
+
     const gridHtml = posters
       .map(function (u, i) {
         return (
@@ -511,8 +771,6 @@ app.get(
     const recsHtml = recs
       .map((r) => {
         const t = r?.title || '';
-        theUrl: {
-        }
         const u = r?.url || '';
         const th = r?.proxiedThumb || r?.thumb || '';
         let path = '';
@@ -525,7 +783,7 @@ app.get(
           '<div class="rec">' +
           (th ? '<img loading="lazy" src="' + escapeAttr(String(th)) + '" alt="">' : '') +
           '<div>' +
-          '<a href="/viewer?url=' +
+          '<a class="nav" href="/viewer?url=' +
           encodeURIComponent(u) +
           '" title="' +
           escapeAttr(t) +
@@ -541,69 +799,80 @@ app.get(
       })
       .join('');
 
-    res
-      .type('html')
-      .send(
-        '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>' +
-          '<title>' +
-          escapeHtml(title) +
-          '</title>' +
-          '<style>' +
-          ':root{--bg:#0e1117;--fg:#e6edf3;--muted:#8b949e;--card:#161b22;--accent:#58a6ff;--shadow:0 10px 30px rgba(0,0,0,.4)}' +
-          'body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,Helvetica,Arial}' +
-          'header{position:sticky;top:0;padding:12px 16px;background:rgba(22,27,34,.9);backdrop-filter:saturate(180%) blur(10px);border-bottom:1px solid rgba(255,255,255,.06);z-index:10}' +
-          'header h1{margin:0;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
-          '.wrap{max-width:1200px;margin:16px auto;padding:0 16px}' +
-          '.card{background:var(--card);border:1px solid rgba(255,255,255,.06);border-radius:12px;box-shadow:var(--shadow);padding:12px;margin-bottom:16px}' +
-          '.muted{color:var(--muted)}' +
-          '.player-embed{aspect-ratio:16/9;border:1px solid rgba(255,255,255,.08);border-radius:12px;overflow:hidden;background:#000}' +
-          '.player-embed iframe{width:100%;height:100%;border:0;display:block}' +
-          '.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px}' +
-          '.thumb{position:relative;padding-top:140px;background:#0b0f15;border-radius:8px;overflow:hidden;cursor:pointer;border:1px solid rgba(255,255,255,.06)}' +
-          '.thumb img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}' +
-          '.lightbox{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;align-items:center;justify-content:center;z-index:9999}' +
-          '.lightbox.open{display:flex}.lightbox img{max-width:96vw;max-height:92vh;object-fit:contain;border-radius:8px;box-shadow:var(--shadow)}' +
-          '.nav{position:fixed;top:50%;transform:translateY(-50%);font-size:20px;color:#fff;background:rgba(0,0,0,.35);border-radius:10px;padding:8px 12px;cursor:pointer;user-select:none}' +
-          '.nav.prev{left:16px}.nav.next{right:16px}.close{position:fixed;top:16px;right:16px;font-size:14px;color:#fff;background:rgba(0,0,0,.35);border-radius:10px;padding:6px 10px;cursor:pointer}' +
-          '.counter{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);color:#fff;font-size:12px;background:rgba(0,0,0,.35);padding:6px 10px;border-radius:10px}' +
-          '.recs{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px}' +
-          '.rec{display:flex;gap:10px;background:var(--card);border:1px solid rgba(255,255,255,.06);border-radius:10px;padding:8px;align-items:center}' +
-          '.rec img{width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid rgba(255,255,255,.08)}' +
-          '.rec a{color:var(--fg);text-decoration:none}.rec a:hover{color:var(--accent);text-decoration:underline}' +
-          '</style></head><body>' +
-          '<header><h1>' +
-          escapeHtml(title) +
-          '</h1></header>' +
-          '<div class="wrap">' +
-          (playerUrl
-            ? '<div class="card"><div class="player-embed"><iframe allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen src="' +
-              escapeAttr(playerUrl) +
-              '"></iframe></div>' +
-              '<div class="muted" style="margin-top:8px">Open player: <a href="' +
-              escapeAttr(playerUrl) +
-              '" target="_blank">player.html</a></div></div>'
-            : '') +
-          (kind === 'images' && posters.length
-            ? '<div class="card"><div class="grid" id="grid">' +
-              gridHtml +
-              '</div></div>' +
-              '<div class="lightbox" id="lightbox" aria-hidden="true">' +
-              '<span class="nav prev" id="prev">Prev</span>' +
-              '<img id="lbImg" alt="current"/>' +
-              '<span class="nav next" id="next">Next</span>' +
-              '<span class="close" id="close">Close</span>' +
-              '<div class="counter" id="counter"></div>' +
-              '</div>'
-            : '') +
-          (recs.length
-            ? '<div class="card"><div class="muted" style="margin:0 0 8px 2px;">Recommendations</div><div class="recs">' +
-              recsHtml +
-              '</div></div>'
-            : '') +
-          '</div>' +
-          '<script>(function(){var imgs=[];var nodes=Array.prototype.slice.call(document.querySelectorAll(".grid .thumb img"));for(var i=0;i<nodes.length;i++){imgs.push(nodes[i].getAttribute("src"));}var grid=document.getElementById("grid");var lb=document.getElementById("lightbox");var lbImg=document.getElementById("lbImg");var prev=document.getElementById("prev");var next=document.getElementById("next");var close=document.getElementById("close");var counter=document.getElementById("counter");var idx=0;function openAt(i){idx=i;lbImg.src=imgs[idx];counter.textContent=(idx+1)+" / "+imgs.length;lb.classList.add("open");lb.setAttribute("aria-hidden","false");}function hide(){lb.classList.remove("open");lb.setAttribute("aria-hidden","true");}function step(d){idx=(idx+d+imgs.length)%imgs.length;lbImg.src=imgs[idx];counter.textContent=(idx+1)+" / "+imgs.length;}if(grid){grid.addEventListener("click",function(e){var t=e.target.closest(".thumb");if(!t)return;var i=Number(t.getAttribute("data-idx")||"0");openAt(i);});}if(prev)prev.addEventListener("click",function(){step(-1);});if(next)next.addEventListener("click",function(){step(1);});if(close)close.addEventListener("click",hide);if(lb)lb.addEventListener("click",function(e){if(e.target===lb)hide();});window.addEventListener("keydown",function(e){if(lb&&lb.classList.contains("open")){if(e.key==="Escape") hide(); else if(e.key==="ArrowLeft") step(-1); else if(e.key==="ArrowRight") step(1);}});})();</script>' +
-          '</body></html>',
-      );
+    res.type('html').send(
+      '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>' +
+        '<title>' +
+        escapeHtml(title) +
+        '</title>' +
+        '<style>' +
+        ':root{--bg:#0e1117;--fg:#e6edf3;--muted:#8b949e;--card:#161b22;--accent:#58a6ff;--shadow:0 10px 30px rgba(0,0,0,.4)}' +
+        'body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,Helvetica,Arial}' +
+        'header{position:sticky;top:0;padding:10px 16px;background:rgba(22,27,34,.9);backdrop-filter:saturate(180%) blur(10px);border-bottom:1px solid rgba(255,255,255,.06);z-index:20;display:flex;gap:12px;align-items:center}' +
+        'header h1{margin:0;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}' +
+        '.actions{display:flex;gap:8px;align-items:center}' +
+        '.act{padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.12);background:#21262d;color:#e6edf3;font-size:12px}' +
+        '.wrap{max-width:1200px;margin:16px auto;padding:0 16px}' +
+        '.card{background:var(--card);border:1px solid rgba(255,255,255,.06);border-radius:12px;box-shadow:var(--shadow);padding:12px;margin-bottom:16px}' +
+        '.muted{color:var(--muted)}' +
+        '.player-embed{aspect-ratio:16/9;border:1px solid rgba(255,255,255,.08);border-radius:12px;overflow:hidden;background:#000}' +
+        '.player-embed iframe{width:100%;height:100%;border:0;display:block}' +
+        '.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px}' +
+        '.thumb{position:relative;padding-top:140px;background:#0b0f15;border-radius:8px;overflow:hidden;cursor:pointer;border:1px solid rgba(255,255,255,.06)}' +
+        '.thumb img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}' +
+        '.lightbox{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;align-items:center;justify-content:center;z-index:9999}' +
+        '.lightbox.open{display:flex}.lightbox img{max-width:96vw;max-height:92vh;object-fit:contain;border-radius:8px;box-shadow:var(--shadow)}' +
+        '.nav{position:fixed;top:50%;transform:translateY(-50%);font-size:20px;color:#fff;background:rgba(0,0,0,.35);border-radius:10px;padding:8px 12px;cursor:pointer;user-select:none}' +
+        '.nav.prev{left:16px}.nav.next{right:16px}.close{position:fixed;top:16px;right:16px;font-size:14px;color:#fff;background:rgba(0,0,0,.35);border-radius:10px;padding:6px 10px;cursor:pointer}' +
+        '.counter{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);color:#fff;font-size:12px;background:rgba(0,0,0,.35);padding:6px 10px;border-radius:10px}' +
+        '.recs{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px}' +
+        '.rec{display:flex;gap:10px;background:var(--card);border:1px solid rgba(255,255,255,.06);border-radius:10px;padding:8px;align-items:center}' +
+        '.rec img{width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid rgba(255,255,255,.08)}' +
+        '.rec a{color:var(--fg);text-decoration:none}.rec a:hover{color:var(--accent);text-decoration:underline}' +
+        '#loading{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;align-items:center;justify-content:center;z-index:9999}' +
+        '.spinner{width:44px;height:44px;border-radius:50%;border:3px solid rgba(255,255,255,.2);border-top-color:#58a6ff;animation:sp 1s linear infinite}@keyframes sp{to{transform:rotate(360deg)}}' +
+        '</style></head><body>' +
+        '<header><h1>' +
+        escapeHtml(title) +
+        '</h1><div class="actions">' +
+        `<a class="act" href="${escapeAttr(rawJsonHref)}" target="_blank">RAW JSON</a>` +
+        `<a class="act" href="${escapeAttr(rawHtmlHref)}" target="_blank">RAW HTML</a>` +
+        '</div></header>' +
+        '<div class="wrap">' +
+        (playerUrl
+          ? '<div class="card"><div class="player-embed"><iframe allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen src="' +
+            escapeAttr(playerUrl) +
+            '"></iframe></div>' +
+            '<div class="muted" style="margin-top:8px">Open player: <a href="' +
+            escapeAttr(playerUrl) +
+            '" target="_blank">player.html</a></div></div>'
+          : '') +
+        (kind === 'images' && posters.length
+          ? '<div class="card"><div class="grid" id="grid">' +
+            gridHtml +
+            '</div></div>' +
+            '<div class="lightbox" id="lightbox" aria-hidden="true">' +
+            '<span class="nav prev" id="prev">Prev</span>' +
+            '<img id="lbImg" alt="current"/>' +
+            '<span class="nav next" id="next">Next</span>' +
+            '<span class="close" id="close">Close</span>' +
+            '<div class="counter" id="counter"></div>' +
+            '</div>'
+          : '') +
+        (recs.length
+          ? '<div class="card"><div class="muted" style="margin:0 0 8px 2px;">Recommendations</div><div class="recs">' +
+            recsHtml +
+            '</div></div>'
+          : '') +
+        '</div>' +
+        '<div id="loading"><div class="spinner"></div></div>' +
+        '<script>(function(){' +
+        'var L=document.getElementById("loading"); function show(){if(L)L.style.display="flex"} function hide(){if(L)L.style.display="none"}' +
+        'document.addEventListener("click",function(e){var a=e.target.closest("a.nav"); if(a){show()}});' +
+        'window.addEventListener("pageshow",hide); window.addEventListener("load",hide);' +
+        '(function(){var imgs=[];var nodes=[].slice.call(document.querySelectorAll(".grid .thumb img"));for(var i=0;i<nodes.length;i++){imgs.push(nodes[i].getAttribute("src"));}var grid=document.getElementById("grid");var lb=document.getElementById("lightbox");var lbImg=document.getElementById("lbImg");var prev=document.getElementById("prev");var next=document.getElementById("next");var close=document.getElementById("close");var counter=document.getElementById("counter");var idx=0;function openAt(i){idx=i;lbImg.src=imgs[idx];counter.textContent=(idx+1)+" / "+imgs.length;lb.classList.add("open");lb.setAttribute("aria-hidden","false");}function hideLb(){lb.classList.remove("open");lb.setAttribute("aria-hidden","true");}function step(d){idx=(idx+d+imgs.length)%imgs.length;lbImg.src=imgs[idx];counter.textContent=(idx+1)+" / "+imgs.length;}if(grid){grid.addEventListener("click",function(e){var t=e.target.closest(".thumb");if(!t)return;var i=Number(t.getAttribute("data-idx")||"0");openAt(i);});}if(prev)prev.addEventListener("click",function(){step(-1);});if(next)next.addEventListener("click",function(){step(1);});if(close)close.addEventListener("click",hideLb);if(lb)lb.addEventListener("click",function(e){if(e.target===lb)hideLb();});window.addEventListener("keydown",function(e){if(lb&&lb.classList.contains("open")){if(e.key==="Escape") hideLb(); else if(e.key==="ArrowLeft") step(-1); else if(e.key==="ArrowRight") step(1);}});})();' +
+        '})();</script>' +
+        '</body></html>',
+    );
   }),
 );
 
@@ -693,7 +962,6 @@ app.get(
   }),
 );
 
-// ---------------------- Raw debug ----------------------
 app.get(
   '/raw',
   asyncRoute(async (req, res) => {
@@ -714,9 +982,9 @@ app.get('/openapi.json', (req, res) => {
     openapi: '3.0.3',
     info: {
       title: 'Multporn API Dev Server',
-      version: '1.9.0',
+      version: '1.11.0',
       description:
-        'Dev server over SDK. Player on /viewer (iframe /player.html). /hub drills via resolveSmart (listing->render, viewer->redirect), alphabet is shown only when present.',
+        'Dev server over SDK. Sorting/filters autodetected from Drupal Views exposed forms. Player on /viewer (iframe /player.html). /hub drills via resolveSmart; pages fetched explicitly with page & exposed params (sort_by, sort_order, type, ...). RAW buttons in header.',
     },
     servers,
     paths: {
@@ -729,7 +997,7 @@ app.get('/openapi.json', (req, res) => {
       },
       '/api/list': {
         get: {
-          summary: 'List by path or by url',
+          summary: 'List by path or by url (with sorting/filters)',
           parameters: [
             { name: 'path', in: 'query', schema: { type: 'string', example: '/munga' } },
             {
@@ -738,6 +1006,16 @@ app.get('/openapi.json', (req, res) => {
               schema: { type: 'string', example: 'https://multporn.net/munga' },
             },
             { name: 'page', in: 'query', schema: { type: 'integer', example: 0 } },
+            { name: 'sort_by', in: 'query', schema: { type: 'string', example: 'created' } },
+            { name: 'sort_order', in: 'query', schema: { type: 'string', example: 'DESC' } },
+            { name: 'type', in: 'query', schema: { type: 'string', example: 'All' } },
+            { name: 'language', in: 'query', schema: { type: 'string', example: '1' } },
+            {
+              name: 'field_user_discription_value',
+              in: 'query',
+              schema: { type: 'string', example: 'All' },
+            },
+            { name: 'letter', in: 'query', schema: { type: 'string', example: 'A' } },
           ],
           responses: { 200: { description: 'OK' } },
         },
@@ -801,12 +1079,14 @@ app.get('/openapi.json', (req, res) => {
       },
       '/hub': {
         get: {
-          summary: 'HTML hub preview with drilldown via resolveSmart + alphabet (if available)',
+          summary: 'HTML hub preview with sorting/filters; pages fetched explicitly',
           parameters: [
             { name: 'path', in: 'query', schema: { type: 'string', example: '/munga' } },
             { name: 'url', in: 'query', schema: { type: 'string' } },
             { name: 'letter', in: 'query', schema: { type: 'string', example: 'A' } },
             { name: 'page', in: 'query', schema: { type: 'integer', example: 0 } },
+            { name: 'sort_by', in: 'query', schema: { type: 'string' } },
+            { name: 'sort_order', in: 'query', schema: { type: 'string' } },
           ],
           responses: { 200: { description: 'text/html' } },
         },

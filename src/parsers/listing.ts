@@ -3,6 +3,7 @@ import { toAbsolute } from '../utils';
 import type { ListingItem, Page } from '../types';
 import { extractTotalPages } from './pagination';
 import { parseAlphabetInline } from './alphabet';
+import { parseExposedSorting } from './sorting';
 
 function pickFromSrcset(srcset?: string): string | undefined {
   if (!srcset) return;
@@ -76,8 +77,7 @@ function isPager($a: cheerio.Cheerio<any>): boolean {
 }
 
 function cardRoot($a: cheerio.Cheerio<any>): cheerio.Cheerio<any> {
-  const r =
-    $a.closest('li, .views-row, td, .node, .views-col, .view-content > div').first();
+  const r = $a.closest('li, .views-row, td, .node, .views-col, .view-content > div').first();
   return r.length ? r : $a.parent();
 }
 
@@ -164,6 +164,7 @@ export function parseHubListing(html: string, baseURL: string, page: number): Pa
   const totalPages = extractTotalPages(html);
   const hasNext = page + 1 < totalPages;
   const alphabet = parseAlphabetInline(html, baseURL) || undefined;
+  const sorting = parseExposedSorting(html, baseURL);
 
   return {
     items,
@@ -172,5 +173,6 @@ export function parseHubListing(html: string, baseURL: string, page: number): Pa
     totalPages,
     pageSize: undefined,
     alphabet,
-  } as any as Page<ListingItem>;
+    sorting,
+  };
 }

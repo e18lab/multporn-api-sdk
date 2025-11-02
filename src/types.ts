@@ -5,6 +5,24 @@ export type ListingItem = {
   proxiedThumb?: string;
 };
 
+export type ExposedOption = {
+  value: string;
+  label: string;
+  selected?: boolean;
+};
+
+export type ExposedSelect = {
+  name: string;
+  label?: string;
+  options: ExposedOption[];
+};
+
+export interface SortingUI {
+  actionPath: string;
+  selects: ExposedSelect[];
+  appliedParams: Record<string, string>;
+}
+
 export type Page<T> = {
   page: number;
   items: T[];
@@ -12,6 +30,7 @@ export type Page<T> = {
   totalPages?: number;
   pageSize?: number;
   alphabet?: AlphabetBlock;
+  sorting?: SortingUI;
 };
 
 export type Post = {
@@ -64,7 +83,14 @@ export type ResolvedViewerRoute = {
     absoluteUrl: string;
     viewer: {
       kind: 'images' | 'video' | 'other';
-      images?: Array<{ original?: string; large?: string; medium?: string; small?: string; thumb?: string; proxied?: string }>;
+      images?: Array<{
+        original?: string;
+        large?: string;
+        medium?: string;
+        small?: string;
+        thumb?: string;
+        proxied?: string;
+      }>;
       video?: {
         poster?: string;
         sources: Array<{ url?: string; proxied?: string; type?: string; label?: string }>;
@@ -143,6 +169,8 @@ export interface ViewerMeta {
   authors: LinkItem[];
   sections: LinkItem[];
   tags: LinkItem[];
+  characters: LinkItem[];
+  userTags: LinkItem[];
   rating?: number;
   votes?: number;
   views?: number;
@@ -176,3 +204,5 @@ export interface ResolveOptions {
   proxyVideo?: (url: string) => string;
   signal?: AbortSignal;
 }
+
+export type ListingQuery = Record<string, string | number | boolean | undefined>;
