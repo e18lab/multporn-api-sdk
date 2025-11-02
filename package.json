@@ -21,6 +21,7 @@
     "node": ">=18"
   },
   "scripts": {
+    "start": "node examples/server/index.mjs",
     "build": "tsup",
     "prepare": "npm run build",
     "test": "vitest run",

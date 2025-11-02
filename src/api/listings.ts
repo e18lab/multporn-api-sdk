@@ -41,7 +41,6 @@ function sniffPagePrefixFromHtml(html: string): string | null {
       if (parts.length > 1) return parts.slice(0, -1).join(',') + ','; // "0,"
     }
   } catch {
-    /* ignore */
   }
   return null;
 }
@@ -72,7 +71,9 @@ export async function latest(
   const applied = params ? {} : getAppliedFromHtml(html0, baseURL);
   const pageParam = buildPageParam(html0, page);
 
-  const html = await http.getHtml(buildUrl(baseURL, '/new', { ...applied, ...(params ?? {}), page: pageParam }));
+  const html = await http.getHtml(
+    buildUrl(baseURL, '/new', { ...applied, ...(params ?? {}), page: pageParam }),
+  );
   return parseHubListing(html, baseURL, page);
 }
 
@@ -143,7 +144,11 @@ export async function listByPath(
     return parsed0;
   }
 
-  const applied = Object.keys(commonParams).length ? {} : (parsed0.sorting?.appliedParams ?? {});
+  const applied =
+    Object.keys(commonParams).length
+      ? {}
+      : (parsed0 as any).sorting?.appliedParams ?? getAppliedFromHtml(html0, baseURL);
+
   const pageParam = buildPageParam(html0, page);
 
   const html = await http.getHtml(
@@ -157,6 +162,7 @@ export async function listByPath(
       const alpha = parseAlphabetInline(entryHtml, baseURL);
       if (alpha) parsed.alphabet = alpha;
     } catch {
+      // best-effort
     }
   }
 
