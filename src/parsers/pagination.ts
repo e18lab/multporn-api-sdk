@@ -1,11 +1,32 @@
 import * as cheerio from 'cheerio';
 
+function pageIndexFromParam(raw?: string | null): number | null {
+  if (!raw) return null;
+  const decoded = decodeURIComponent(String(raw));
+  const parts = decoded
+    .split(',')
+    .map((s) => parseInt(s.trim(), 10))
+    .filter((n) => Number.isFinite(n));
+  if (!parts.length) return null;
+  return Math.max(...parts);
+}
+
+function pageIndexFromHref(href: string): number | null {
+  if (!href) return null;
+  try {
+    const u = new URL(href, 'https://example.com');
+    return pageIndexFromParam(u.searchParams.get('page'));
+  } catch {
+    const m = href.match(/[?&]page=([^&#]+)/i);
+    return m ? pageIndexFromParam(m[1]) : null;
+  }
+}
+
 export function extractTotalPages(html: string): number {
   const $ = cheerio.load(html);
   const root = $(
     'ul.pager, nav.pagination, .pagination, .item-list .pager, #content .pager',
   ).first();
-
   if (!root.length) return 1;
 
   const lastHref =
@@ -14,29 +35,21 @@ export function extractTotalPages(html: string): number {
       .attr('href') || undefined;
 
   if (lastHref) {
-    const m = /[?&]page=(\d+)/i.exec(lastHref);
-    if (m) {
-      const n = parseInt(m[1], 10);
-      if (Number.isFinite(n)) return Math.max(1, n + 1);
-    }
+    const idx = pageIndexFromHref(lastHref);
+    if (idx != null) return Math.max(1, idx + 1);
   }
 
-  let maxNum = 0;
-
-  root.find('a, li, span').each((_, el) => {
-    const txt = ($(el).text() || '').trim();
-    const n = Number(txt);
-    if (Number.isFinite(n)) maxNum = Math.max(maxNum, n);
-  });
-
+  let maxPages = 0;
   root.find('a[href]').each((_, a) => {
     const href = String($(a).attr('href') || '');
-    const m = /[?&]page=(\d+)/i.exec(href);
-    if (m) {
-      const idx = parseInt(m[1], 10);
-      if (Number.isFinite(idx)) maxNum = Math.max(maxNum, idx + 1);
-    }
+    const idx = pageIndexFromHref(href);
+    if (idx != null) maxPages = Math.max(maxPages, idx + 1);
   });
 
-  return Math.max(1, maxNum || 1);
+  root.find('a, li, span').each((_, el) => {
+    const n = Number(($(el).text() || '').trim());
+    if (Number.isFinite(n)) maxPages = Math.max(maxPages, n);
+  });
+
+  return Math.max(1, maxPages || 1);
 }

@@ -112,7 +112,13 @@ export function parseAlphabetInline(html: string, baseURL: string): AlphabetBloc
   }
 
   chosen.letters.sort((a, b) => a.label.localeCompare(b.label, 'en'));
+  if (!looksLikeAlphabet(chosen.letters)) return null;
   return { section: chosen.section, letters: chosen.letters };
+}
+
+function looksLikeAlphabet(letters: AlphabetLetter[]): boolean {
+  const short = letters.filter(l => /^[A-Z#]$/i.test(l.label.trim())).length;
+  return letters.length >= 10 && short >= 10;
 }
 
 function pickFromSrcset(srcset?: string): string | undefined {

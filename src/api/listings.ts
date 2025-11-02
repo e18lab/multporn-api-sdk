@@ -17,6 +17,15 @@ type ListByPathOptions = {
   letter?: string;
 };
 
+function sniffPagePrefix(html: string): string {
+  const m = html.match(/href="[^"]*?\bpage=([^"&]+)"/i);
+  if (!m) return '';
+  const decoded = decodeURIComponent(m[1]);
+  const parts = decoded.split(',').map((s) => s.trim());
+  if (parts.length <= 1) return '';
+  return parts.slice(0, -1).join(',') + ','; // "0,"
+}
+
 export async function listByPath(
   http: HttpClient,
   baseURL: string,
@@ -27,7 +36,14 @@ export async function listByPath(
   const clean = path.startsWith('/') ? path : `/${path}`;
 
   if (!opts?.letter) {
-    const html = await http.getHtml(`${clean}?page=${page}`);
+    const firstHtml = await http.getHtml(`${clean}?page=0`);
+    if (page === 0) {
+      return parseHubListing(firstHtml, baseURL, 0);
+    }
+
+    const prefix = sniffPagePrefix(firstHtml);
+    const pageParam = prefix ? `${prefix}${page}` : String(page);
+    const html = await http.getHtml(`${clean}?page=${encodeURIComponent(pageParam)}`);
     return parseHubListing(html, baseURL, page);
   }
 
@@ -49,7 +65,6 @@ export async function listByPath(
     return { ...res, alphabet } as any;
   }
 
-  // Fallback: угадываем секцию из пути
   const section = guessAlphabetSectionFromPath(clean);
   const letterUrl = `/${section}/${encodeURIComponent(String(opts.letter).toUpperCase())}`;
   const urlWithPage = `${letterUrl}?page=${page}`;

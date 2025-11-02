@@ -67,49 +67,102 @@ function findTitleLink($scope: cheerio.Cheerio<any>) {
   return $scope.find(sel).first();
 }
 
+function textFrom($el: cheerio.Cheerio<any>): string {
+  return ($el.text() || '').replace(/\s+/g, ' ').trim();
+}
+
+function isPager($a: cheerio.Cheerio<any>): boolean {
+  return !!$a.closest('ul.pager, .pager, nav.pagination').length;
+}
+
+function cardRoot($a: cheerio.Cheerio<any>): cheerio.Cheerio<any> {
+  const r =
+    $a.closest('li, .views-row, td, .node, .views-col, .view-content > div').first();
+  return r.length ? r : $a.parent();
+}
+
 export function parseHubListing(html: string, baseURL: string, page: number): Page<ListingItem> {
   const $ = cheerio.load(html);
   const items: ListingItem[] = [];
+  const seen = new Set<string>();
 
-  $('table.views-view-grid td').each((_, td) => {
-    const $td = $(td);
-    const a = findTitleLink($td);
-    const href = a.attr('href') || '';
-    const url = toAbsolute(baseURL, href);
-    const title = (
-      a.text() ||
-      $td.find('.views-field-title .field-content').text() ||
-      $td.find('.views-field-name .field-content').text() ||
-      $td.find('strong').first().text() ||
-      $td.find('h5').first().text() ||
-      ''
-    ).trim();
-    const thumb = pickThumb($td, baseURL);
-    if (url && title) items.push({ title, url, thumb });
-  });
+  const views = $('.view');
+  const scopes = views.length ? views.toArray() : [$('body').get(0)!];
 
-  if (!items.length) {
-    $('.view .view-content .views-row').each((_, row) => {
+  for (const v of scopes) {
+    const $view = $(v);
+    const $root = $view.find('.view-content').length ? $view.find('.view-content') : $view;
+
+    $root.find('table.views-view-grid td').each((_, td) => {
+      const $td = $(td);
+      const a = findTitleLink($td);
+      const href = a.attr('href') || '';
+      const url = toAbsolute(baseURL, href);
+      if (!url || seen.has(url)) return;
+
+      const title =
+        textFrom(a) ||
+        textFrom($td.find('.views-field-title .field-content')) ||
+        textFrom($td.find('.views-field-name .field-content')) ||
+        a.attr('title') ||
+        '';
+
+      const thumb = pickThumb($td, baseURL);
+      if (title) {
+        items.push({ title, url, thumb });
+        seen.add(url);
+      }
+    });
+
+    $root.find('.views-row, .node, li').each((_, row) => {
       const $row = $(row);
       const a = findTitleLink($row);
       const href = a.attr('href') || '';
       const url = toAbsolute(baseURL, href);
-      const title = (
-        a.text() ||
-        $row.find('.views-field-title .field-content').text() ||
-        $row.find('.views-field-name .field-content').text() ||
-        $row.find('strong').first().text() ||
-        $row.find('h5').first().text() ||
-        ''
-      ).trim();
+      if (!url || seen.has(url)) return;
+
+      const title =
+        textFrom(a) ||
+        textFrom($row.find('.views-field-title .field-content')) ||
+        textFrom($row.find('.views-field-name .field-content')) ||
+        a.attr('title') ||
+        '';
+
       const thumb = pickThumb($row, baseURL);
-      if (url && title) items.push({ title, url, thumb });
+      if (title) {
+        items.push({ title, url, thumb });
+        seen.add(url);
+      }
+    });
+
+    $root.find('a[href] img').each((_, imgEl) => {
+      const $a = $(imgEl).closest('a[href]');
+      if (isPager($a)) return;
+
+      const url = toAbsolute(baseURL, $a.attr('href') || '');
+      if (!url || seen.has(url)) return;
+
+      const $card = cardRoot($a);
+      const title =
+        textFrom($card.find('.views-field-title .field-content').first()) ||
+        textFrom($card.find('.views-field-name .field-content').first()) ||
+        $a.attr('title') ||
+        ($(imgEl).attr('alt') || '');
+
+      if (!title.trim()) return;
+
+      const thumb =
+        pickThumb($card, baseURL) ||
+        pickThumb($a, baseURL) ||
+        toAbsolute(baseURL, $(imgEl).attr('src') || '');
+
+      items.push({ title: title.trim(), url, thumb });
+      seen.add(url);
     });
   }
 
   const totalPages = extractTotalPages(html);
   const hasNext = page + 1 < totalPages;
-
   const alphabet = parseAlphabetInline(html, baseURL) || undefined;
 
   return {

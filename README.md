@@ -1,100 +1,71 @@
-# @your-scope/multporn-api
+# @e18lab/multporn-api
 
-**Неофициальный** HTML‑скрейпер для Multporn (Node 18+). Позволяет искать публикации, листать ленту, получать изображения из поста. Пакет не содержит явного контента — только код для парсинга публичных страниц.
+**Unofficial** HTML scraper for Multporn (Node 18+). It can paginate hubs (/comic, /munga, etc.), work with the **alphabet**, search, fetch posts (images and video metadata), and also *smartly* determine whether a link is a hub or a specific post.
 
-> ⚠️ **Дисклеймер**: Используйте на свой риск, соблюдайте условия сайта, robots.txt и законы вашей юрисдикции. Ограничивайте скорость запросов и кэшируйте результаты.
-
-## Установка
+## Installation
 
 ```bash
-yarn add @your-scope/multporn-api
-# или
-npm i @your-scope/multporn-api
+yarn add @e18lab/multporn-api
+# or
+npm i @e18lab/multporn-api
 ```
 
-## Быстрый старт
+## Quick start
 
 ```ts
-import { MultpornClient } from '@your-scope/multporn-api';
+import { MultpornClient } from '@e18lab/multporn-api';
 
 const mp = new MultpornClient({
-  baseURL: 'https://multporn.net', // по умолчанию
+  baseURL: 'https://multporn.net', // default
   timeoutMs: 15000,
   retry: { retries: 3 },
 });
 
-// Последние публикации (главная)
+// Latest posts (homepage “New”)
 const latest = await mp.latest(0);
-console.log(latest.items.slice(0, 5));
+console.log('latest:', latest.items.slice(0, 3));
 
-// Поиск
+// “Manga” hub
+const manga = await mp.listByPath('/munga', 0);
+console.log('manga page0 items:', manga.items.length, 'hasNext:', manga.hasNext);
+
+// “Manga” alphabet: letters
+const letters = await mp.alphabetLetters('manga');
+console.log('letters:', letters.map(l => l.label).join(' '));
+
+// “Manga” alphabet: entries for letter A
+const mangaA = await mp.alphabet('manga', 'A', 0);
+// same via listByPath:
+const mangaA2 = await mp.listByPath('/munga', 0, { letter: 'A' });
+
+// Search
 const found = await mp.search('naruto', 0);
+console.log('found:', found.items.slice(0, 3));
 
-// Пост (url или относительный slug)
-const post = await mp.getPost('/post/some-slug'); // или полная ссылка
-console.log(post.title, post.images.length);
-```
+// Post (URL or relative slug)
+const post = await mp.getPost('/comics/haywire'); // full URL also works
+console.log(post.title, 'images:', post.images?.length || 0);
 
-## API
-
-```ts
-class MultpornClient {
-  constructor(opts?: {
-    baseURL?: string; // 'https://multporn.net' по умолчанию
-    headers?: Record<string, string>;
-    timeoutMs?: number; // 15s по умолчанию
-    retry?: {
-      retries?: number;
-      factor?: number;
-      minDelayMs?: number;
-      maxDelayMs?: number;
-      retryOn?: (status?: number) => boolean;
-    };
-    userAgent?: string; // нативный браузер UA по умолчанию
-  });
-
-  latest(page?: number): Promise<Page<ListingItem>>;
-  search(query: string, page?: number): Promise<Page<ListingItem>>;
-  byTag(tagSlug: string, page?: number): Promise<Page<ListingItem>>;
-  getPost(urlOrSlug: string): Promise<Post>;
+// Smart-resolve: figures out whether it’s a hub or a post
+const resolved = await mp.resolveSmart('https://multporn.net/munga');
+if (resolved.route === 'listing') {
+  console.log('This is a hub. items:', resolved.data.items.length);
+} else if (resolved.route === 'viewer') {
+  console.log('This is a post. kind:', resolved.data.viewer.kind);
 }
-
-type ListingItem = { title: string; url: string; thumb?: string; tags?: string[] };
-type Post = {
-  title: string;
-  url: string;
-  images: string[];
-  tags?: string[];
-  author?: string | null;
-};
-type Page<T> = { items: T[]; page: number; hasNext: boolean };
 ```
 
-## Сборка и тесты
+## Dev server example
+
+`examples/dev-server.mjs` ships a ready-to-use Express server:
+
+* `/hub?path=/munga[&letter=A][&page=0]` — hub preview with alphabet; hides the pager when there’s only one page
+* `/viewer?url=...` — post preview (videos via the embedded `player.html`, images as a gallery)
+* `/img?url=...` and `/vid?url=...` — media proxies (set proper Referer/Origin; `/vid` supports HLS and Range)
+* REST endpoints: `/api/list`, `/api/search`, `/api/resolve`, `/api/alphabet/*`, `/api/post`, `/api/updates`
+
+Run:
 
 ```bash
-yarn install
-yarn build
-yarn test
-```
-
-## Публикация
-
-```bash
-yarn npm login
-yarn publish --access public
-```
-
-## Практические советы
-
-- Добавьте локальный кэш (например, `keyv`) чтобы не дёргать страницу повторно.
-- Рейтлимит (например, `p-limit` или очередь) если планируете массовое сканирование.
-- Структура страниц может меняться — держите парсеры изолированными и покрывайте тестами.
-- Если сайт отдаёт WebP/AVIF — используйте конвертацию на стороне вашего приложения при необходимости.
-
-### Updates (jcarousel)
-
-```ts
-const { items } = await mp.updates({ first: 1, last: 8 });
-console.log(items[0]); // { title, url, thumb }
+node examples/dev-server.mjs
 ```

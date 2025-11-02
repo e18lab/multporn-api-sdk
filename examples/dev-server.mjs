@@ -89,22 +89,15 @@ function unwrapMediaUrl(u) {
         maybe.searchParams.get('src');
       if (inner) {
         v = inner;
-        try {
-          v = decodeURIComponent(v);
-        } catch {}
-        try {
-          v = decodeURIComponent(v);
-        } catch {}
+        try { v = decodeURIComponent(v); } catch {}
+        try { v = decodeURIComponent(v); } catch {}
         continue;
       }
     } catch {
-      try {
-        v = decodeURIComponent(v);
-      } catch {}
+      try { v = decodeURIComponent(v); } catch {}
     }
     break;
   }
-
   if (v.startsWith('//')) v = new URL(ORIGIN).protocol + v;
   return v;
 }
@@ -156,6 +149,7 @@ function withProxiedRecs(obj) {
     recommendations: obj.recommendations.map((r) => ({ ...r, proxiedThumb: proxyImg(r.thumb) })),
   };
 }
+
 function guessSectionFromPath(pathname = '') {
   if (/^\/munga(?:\/|$)/i.test(pathname)) return 'manga';
   if (/^\/comic(?:\/|$)/i.test(pathname)) return 'comics';
@@ -168,6 +162,7 @@ function guessSectionFromPath(pathname = '') {
   return 'comics';
 }
 
+// ---------------------- Home ----------------------
 app.get('/', (req, res) => {
   res
     .type('html')
@@ -203,7 +198,10 @@ app.get(
     const url = req.query.url;
     if (!url) return res.status(400).json({ error: 'missing ?url' });
 
-    const data = await sdkClient.resolveSmart(String(url), { proxyImage: proxyImg });
+    const data = await sdkClient.resolveSmart(String(url), {
+      proxyImage: proxyImg,
+      proxyVideo: proxyVid,
+    });
     const patched =
       data?.route === 'viewer' && data?.data ? { ...data, data: withProxiedRecs(data.data) } : data;
 
@@ -218,9 +216,7 @@ app.get(
     const path = pathFromQuery({ path: req.query.path, url: req.query.url });
     const page = Number(req.query.page ?? '0');
 
-    const raw =
-      path === '/' ? await sdkClient.latest(page) : await sdkClient.listByPath(path, page);
-
+    const raw = path === '/' ? await sdkClient.latest(page) : await sdkClient.listByPath(path, page);
     const data = withProxiedThumbs(raw);
 
     const url = req.query.url ? String(req.query.url) : new URL(path, ORIGIN).toString();
@@ -306,31 +302,54 @@ app.get(
     const page = Number(req.query.page ?? '0');
     const letter = req.query.letter ? String(req.query.letter) : null;
 
+    const incomingUrl = req.query.url ? String(req.query.url) : null;
     const path = pathFromQuery({ path: req.query.path, url: req.query.url });
-    const title = 'Hub ' + path;
+    const title = 'Hub ' + (incomingUrl || path);
 
     let data;
-    if (letter) {
-      const section = guessSectionFromPath(path);
-      data = await sdkClient.alphabet(section, letter, page);
-    } else {
-      data = path === '/' ? await sdkClient.latest(page) : await sdkClient.listByPath(path, page);
-    }
-    data = withProxiedThumbs(data);
-
-    const section = guessSectionFromPath(path);
     let letters = [];
-    try {
-      letters = await sdkClient.alphabetLetters(section);
-    } catch {}
 
-    const itemsHtml = (Array.isArray(data.items) ? data.items : [])
+    if (incomingUrl) {
+      const resolved = await sdkClient.resolveSmart(incomingUrl, {
+        proxyImage: proxyImg,
+        proxyVideo: proxyVid,
+      });
+
+      if (resolved.route === 'viewer') {
+        res.redirect('/viewer?url=' + encodeURIComponent(incomingUrl));
+        return;
+      }
+
+      data = withProxiedThumbs(resolved.data);
+      if (resolved.data?.alphabet?.letters?.length) {
+        letters = resolved.data.alphabet.letters;
+      }
+    } else {
+      if (letter) {
+        const section = guessSectionFromPath(path);
+        data = await sdkClient.alphabet(section, letter, page);
+      } else {
+        data = path === '/' ? await sdkClient.latest(page) : await sdkClient.listByPath(path, page);
+      }
+      data = withProxiedThumbs(data);
+
+      if (data?.alphabet?.letters?.length) {
+        letters = data.alphabet.letters;
+      } else if (letter) {
+        const hub0 = await sdkClient.listByPath(path, 0);
+        if (hub0?.alphabet?.letters?.length) {
+          letters = hub0.alphabet.letters;
+        }
+      }
+    }
+
+    const itemsHtml = (Array.isArray(data?.items) ? data.items : [])
       .map((it) => {
         const img = it.proxiedThumb || proxyImg(it.thumb) || '';
         const t = it.title || '';
         const u = it.url || '';
         return (
-          '<a class="card" href="/viewer?url=' +
+          '<a class="card" href="/hub?url=' +
           encodeURIComponent(u) +
           '">' +
           (img ? '<img src="' + escapeAttr(String(img)) + '" alt="">' : '') +
@@ -353,13 +372,13 @@ app.get(
       .join('');
 
     const totalPages =
-      typeof data.totalPages === 'number' && data.totalPages > 0 ? data.totalPages : 1;
+      typeof data?.totalPages === 'number' && data.totalPages > 0 ? data.totalPages : 1;
     const hasPrev = page > 0;
-    const hasNext = !!data.hasNext && page + 1 < totalPages;
+    const hasNext = !!data?.hasNext && page + 1 < totalPages;
 
     const queryBase =
-      '/hub?path=' +
-      encodeURIComponent(path) +
+      '/hub?' +
+      (incomingUrl ? 'url=' + encodeURIComponent(incomingUrl) : 'path=' + encodeURIComponent(path)) +
       (letter ? '&letter=' + encodeURIComponent(letter) : '') +
       '&page=';
 
@@ -424,7 +443,10 @@ app.get(
     const url = String(req.query.url || '');
     if (!url) return res.status(400).send('<h3>Missing ?url</h3>');
 
-    const resolved = await sdkClient.resolveSmart(String(url), { proxyImage: proxyImg });
+    const resolved = await sdkClient.resolveSmart(String(url), {
+      proxyImage: proxyImg,
+      proxyVideo: proxyVid,
+    });
 
     if (resolved?.route === 'listing') {
       const path = resolved?.data?.path || new URL(String(url)).pathname;
@@ -489,6 +511,8 @@ app.get(
     const recsHtml = recs
       .map((r) => {
         const t = r?.title || '';
+        theUrl: {
+        }
         const u = r?.url || '';
         const th = r?.proxiedThumb || r?.thumb || '';
         let path = '';
@@ -669,6 +693,7 @@ app.get(
   }),
 );
 
+// ---------------------- Raw debug ----------------------
 app.get(
   '/raw',
   asyncRoute(async (req, res) => {
@@ -689,9 +714,9 @@ app.get('/openapi.json', (req, res) => {
     openapi: '3.0.3',
     info: {
       title: 'Multporn API Dev Server',
-      version: '1.8.0',
+      version: '1.9.0',
       description:
-        'Dev server over SDK. Player integrated on /viewer (iframe /player.html). /hub shows listings with alphabet and hides pager when only one page.',
+        'Dev server over SDK. Player on /viewer (iframe /player.html). /hub drills via resolveSmart (listing->render, viewer->redirect), alphabet is shown only when present.',
     },
     servers,
     paths: {
@@ -776,7 +801,7 @@ app.get('/openapi.json', (req, res) => {
       },
       '/hub': {
         get: {
-          summary: 'HTML hub preview with alphabet and pager',
+          summary: 'HTML hub preview with drilldown via resolveSmart + alphabet (if available)',
           parameters: [
             { name: 'path', in: 'query', schema: { type: 'string', example: '/munga' } },
             { name: 'url', in: 'query', schema: { type: 'string' } },

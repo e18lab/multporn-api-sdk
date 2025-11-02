@@ -6,7 +6,6 @@ import {
   ViewerResult,
   ResolvedRoute,
   ViewerPayload,
-  ListingPayload,
   Page,
   ListingItem,
 } from '../types';
@@ -83,14 +82,36 @@ function parseImagesWithBackoff(
   while ((m = re.exec(html))) {
     const original = absolutize(m[1], baseURL);
     if (!original) continue;
-    images.push({
-      original,
-      medium: original,
-    } as ViewerImage);
+    images.push({ original, medium: original } as ViewerImage);
   }
 
   const meta = extractMeta(html, baseURL);
   return { meta, images };
+}
+
+function countOcc(html: string, rx: RegExp): number {
+  let c = 0;
+  rx.lastIndex = 0;
+  while (rx.exec(html)) c++;
+  return c;
+}
+
+function hasViewerClues(html: string): boolean {
+  const hasJuicebox =
+    /juicebox/i.test(html) || /\/juicebox\/xml\/field\/node\/\d+\/[a-z0-9_]+\/full/i.test(html);
+  const hasFieldNode = /id=["']field--node--\d+--[a-z0-9_-]+--full["']/i.test(html);
+  const hasJbStyles = /styles\/juicebox_(?:large|medium|small)\//i.test(html);
+  const hasNodeBody = /<body[^>]+class=["'][^"']*\bnode\b[^"']*["']/i.test(html);
+  const hasGalleryField =
+    /field-name-(?:field_)?(?:pictures|images|image|post_pictures)\b/i.test(html);
+  return hasJuicebox || hasFieldNode || hasJbStyles || hasNodeBody || hasGalleryField;
+}
+
+function isStrongListing(html: string): boolean {
+  const rows = countOcc(html, /class=["'][^"']*\bviews-row\b[^"']*["']/gi);
+  const hasViewContent = /class=["'][^"']*\bview-content\b[^"']*["']/i.test(html);
+  const hasPager = /class=["'][^"']*\bpager\b[^"']*["']/i.test(html);
+  return (hasViewContent && rows >= 12) || hasPager; // подбиралось эмпирически
 }
 
 export const ViewerAPI = {
@@ -103,9 +124,8 @@ export const ViewerAPI = {
     const url = buildViewerUrl(baseURL, urlOrSlug);
     const html = await fetchHtml(http, url);
 
-    // 1) Видео
     const parsedVideo = parseVideoFromHtml(html, baseURL);
-    if (parsedVideo) {
+    if (parsedVideo && parsedVideo.sources?.length) {
       const meta = extractMeta(html, baseURL);
       return {
         kind: 'video',
@@ -120,26 +140,26 @@ export const ViewerAPI = {
       };
     }
 
-    const imgRes = parseImagesWithBackoff(html, baseURL);
-    const images: ViewerImage[] = (imgRes.images || []).map((im: ViewerImage) => {
-      const preferred =
-        im.original ||
-        (im as any).large ||
-        (im as any).medium ||
-        (im as any).small ||
-        (im as any).thumb ||
-        '';
+    if (hasViewerClues(html)) {
+      const imgRes = parseImagesWithBackoff(html, baseURL);
+      const images: ViewerImage[] = (imgRes.images || []).map((im: ViewerImage) => {
+        const preferred =
+          im.original ||
+          (im as any).large ||
+          (im as any).medium ||
+          (im as any).small ||
+          (im as any).thumb ||
+          '';
+        return { ...im, proxied: proxyImgMaybe(preferred, opts) };
+      });
       return {
-        ...im,
-        proxied: proxyImgMaybe(preferred, opts),
+        kind: 'images',
+        meta: imgRes.meta,
+        images,
       };
-    });
+    }
 
-    return {
-      kind: 'images',
-      meta: imgRes.meta,
-      images,
-    };
+    return { kind: 'other', meta: extractMeta(html, baseURL) };
   },
 
   async resolveSmart(
@@ -154,57 +174,77 @@ export const ViewerAPI = {
 
     const html = await fetchHtml(http, url);
 
-    const kind = detectPageKind(html);
-    if (kind === 'listing') {
-      const page: Page<ListingItem> = await ListingsAPI.listByPath(http, baseURL, path, 0);
-      const listingPayload: ListingPayload = {
-        absoluteUrl: url,
-        path,
-        page,
+    const parsedVideo = parseVideoFromHtml(html, baseURL);
+    if (parsedVideo && parsedVideo.sources?.length) {
+      const meta = extractMeta(html, baseURL);
+      const viewer: ViewerResult = {
+        kind: 'video',
+        meta,
+        video: {
+          poster: parsedVideo.poster ? proxyImgMaybe(parsedVideo.poster, opts) : undefined,
+          sources: parsedVideo.sources.map((s) => ({
+            ...s,
+            proxied: proxyVidMaybe(s.url, opts),
+          })),
+        },
       };
-      return { route: 'listing', data: listingPayload };
+
+      let recommendations: ListingItem[] | undefined;
+      try {
+        const recPage = parseHubListing(html, baseURL, 0);
+        if (recPage?.items?.length) {
+          recommendations = recPage.items.map((it) => ({
+            ...it,
+            proxiedThumb: it.thumb ? proxyImgMaybe(it.thumb, opts) : undefined,
+          }));
+        }
+      } catch {}
+
+      const data: ViewerPayload = { absoluteUrl: url, path, viewer };
+      (data as any).recommendations = recommendations;
+      return { route: 'viewer', data: data as any };
     }
 
-    const viewer = await this.resolveViewer(http, baseURL, urlOrSlug, opts);
+    if (hasViewerClues(html)) {
+      const { meta, images } = parseImagesWithBackoff(html, baseURL);
+      const mapped: ViewerImage[] = (images || []).map((im: ViewerImage) => {
+        const preferred =
+          im.original ||
+          (im as any).large ||
+          (im as any).medium ||
+          (im as any).small ||
+          (im as any).thumb ||
+          '';
+        return { ...im, proxied: proxyImgMaybe(preferred, opts) };
+      });
 
-    let recommendations: ListingItem[] | undefined;
-    try {
-      const recPage = parseHubListing(html, baseURL, 0);
-      if (recPage?.items?.length) {
-        recommendations = recPage.items.map((it) => ({
-          ...it,
-          proxiedThumb: it.thumb ? proxyImgMaybe(it.thumb, opts) : undefined,
-        }));
-      }
-    } catch {}
+      const viewer: ViewerResult = { kind: 'images', meta, images: mapped };
 
-    const viewerPayload: ViewerPayload = {
-      absoluteUrl: url,
-      path,
-      viewer,
-    };
+      let recommendations: ListingItem[] | undefined;
+      try {
+        const recPage = parseHubListing(html, baseURL, 0);
+        if (recPage?.items?.length) {
+          recommendations = recPage.items.map((it) => ({
+            ...it,
+            proxiedThumb: it.thumb ? proxyImgMaybe(it.thumb, opts) : undefined,
+          }));
+        }
+      } catch {}
 
-    (viewerPayload as any).recommendations = recommendations;
+      const data: ViewerPayload = { absoluteUrl: url, path, viewer };
+      (data as any).recommendations = recommendations;
+      return { route: 'viewer', data: data as any  };
+    }
 
-    return { route: 'viewer', data: viewerPayload };
+    if (isStrongListing(html)) {
+      const page: Page<ListingItem> = await ListingsAPI.listByPath(http, baseURL, path, 0);
+      return { route: 'listing', data: { ...page, absoluteUrl: url, path } as any };
+    }
+
+    const page: Page<ListingItem> = await ListingsAPI.listByPath(http, baseURL, path, 0);
+    return { route: 'listing', data: { ...page, absoluteUrl: url, path } as any };
   },
 };
-
-function detectPageKind(html: string): 'video' | 'images' | 'listing' {
-  const hasVideo = /<video\b|class=["']video-js\b|node-video/i.test(html);
-
-  const hasJuicebox =
-    /juicebox/i.test(html) || /\/juicebox\/xml\/field\/node\/\d+\/[a-z0-9_]+\/full/i.test(html);
-  const hasFieldNode = /id=["']field--node--\d+--[a-z0-9_-]+--full["']/i.test(html);
-  const hasJbStyles = /styles\/juicebox_(?:large|medium|small)\//i.test(html);
-  const hasViewerClues = hasJuicebox || hasFieldNode || hasJbStyles;
-
-  const hasListingViews = /class=["']view\b/i.test(html) && /class=["']views-row\b/i.test(html);
-
-  if (hasVideo) return 'video';
-  if (hasViewerClues) return 'images';
-  return hasListingViews ? 'listing' : 'images';
-}
 
 function extractText(html: string, re: RegExp) {
   const m = html.match(re);

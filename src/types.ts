@@ -50,6 +50,33 @@ export type MultpornUpdatesParams = {
   jcarousel_dom_id?: string | number;
 };
 
+export type ResolvedListingRoute = {
+  route: 'listing';
+  data: Page<ListingItem> & {
+    absoluteUrl: string;
+    path: string;
+  };
+};
+
+export type ResolvedViewerRoute = {
+  route: 'viewer';
+  data: {
+    absoluteUrl: string;
+    viewer: {
+      kind: 'images' | 'video' | 'other';
+      images?: Array<{ original?: string; large?: string; medium?: string; small?: string; thumb?: string; proxied?: string }>;
+      video?: {
+        poster?: string;
+        sources: Array<{ url?: string; proxied?: string; type?: string; label?: string }>;
+      };
+      meta?: Record<string, unknown>;
+    };
+    recommendations?: ListingItem[];
+  };
+};
+
+export type ResolvedRoute = ResolvedListingRoute | ResolvedViewerRoute;
+
 export type AlphabetSection =
   | 'comics'
   | 'category_comic'
@@ -143,10 +170,6 @@ export type ViewerPayload = {
   path: string;
   recommendations?: ListingItem[];
 };
-
-export type ResolvedRoute =
-  | { route: 'viewer'; data: ViewerPayload }
-  | { route: 'listing'; data: ListingPayload };
 
 export interface ResolveOptions {
   proxyImage?: (url: string) => string;
