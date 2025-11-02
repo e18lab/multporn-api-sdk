@@ -1,0 +1,1015 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Custom Video Player</title>
+    <style>
+      :root {
+        --bg: #0f0f0f;
+        --card: #181818;
+        --card-2: #0c0c0c;
+        --fg: #ffffff;
+        --muted: #909090;
+        --brand: #ff0000;
+        --danger: #ff0000;
+        --ok: #00ff00;
+        --shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+        --radius: 8px;
+        --radius-sm: 4px;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        height: 100%;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font:
+          14px/1.45 system-ui,
+          -apple-system,
+          Segoe UI,
+          Roboto,
+          Ubuntu,
+          Cantarell,
+          Noto Sans,
+          Helvetica,
+          Arial;
+      }
+      .wrap {
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+      .title {
+        display: none;
+        margin: 0 0 10px 2px;
+        font-weight: 600;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .player {
+        position: relative;
+        background: #000;
+        border-radius: var(--radius);
+        aspect-ratio: 16/9;
+        user-select: none;
+      }
+      .player video {
+        width: 100%;
+        height: 100%;
+        display: block;
+        border-radius: inherit;
+        background: #000;
+        outline: none;
+      }
+      .player video::-webkit-media-controls {
+        display: none !important;
+      }
+      .controls {
+        position: absolute;
+        inset: auto 0 0 0;
+        padding: 10px;
+        opacity: 1;
+        transition: opacity 0.2s ease;
+        background: linear-gradient(
+          180deg,
+          transparent 0,
+          rgba(0, 0, 0, 0.3) 30%,
+          rgba(0, 0, 0, 0.7) 100%
+        );
+        border-bottom-left-radius: inherit;
+        border-bottom-right-radius: inherit;
+      }
+      .player.hide-ui .controls {
+        opacity: 0;
+        pointer-events: none;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .bar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin: 6px 0;
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 40px;
+        min-height: 40px;
+        border-radius: 999px;
+        background: transparent;
+        cursor: pointer;
+        color: var(--fg);
+        border: 0;
+      }
+      .btn:hover {
+        background: rgba(255, 255, 255, 0.1);
+      }
+      .btn[aria-pressed='true'] {
+        background: rgba(255, 0, 0, 0.2);
+      }
+      .label {
+        font-variant-numeric: tabular-nums;
+        color: var(--fg);
+        font-size: 13px;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .time {
+        min-width: 90px;
+        text-align: center;
+      }
+      .grow {
+        flex: 1;
+      }
+      .vol {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 70px;
+        width: 104px;
+      }
+      input[type='range'] {
+        appearance: none;
+        height: 3px;
+        background: #606060;
+        border-radius: 999px;
+        outline: none;
+        width: 100%;
+      }
+      input[type='range']::-webkit-slider-thumb {
+        appearance: none;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: #fff;
+        border: none;
+      }
+      .progress {
+        position: relative;
+        height: 3px;
+        border-radius: 999px;
+        background: #303030;
+        cursor: pointer;
+        width: 100%;
+        transition: height 0.15s;
+      }
+      .progress:hover {
+        height: 5px;
+      }
+      .progress .buf,
+      .progress .cur {
+        position: absolute;
+        inset: 0;
+        height: 100%;
+        border-radius: inherit;
+        transform-origin: left;
+      }
+      .progress .buf {
+        background: #606060;
+        transform: scaleX(0);
+      }
+      .progress .cur {
+        background: var(--brand);
+        transform: scaleX(0);
+      }
+      .progress .thumb {
+        position: absolute;
+        top: 50%;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: #fff;
+        border: none;
+        transform: translate(-50%, -50%) scale(0);
+        transition: transform 0.15s;
+      }
+      .progress:hover .thumb {
+        transform: translate(-50%, -50%) scale(1);
+      }
+      .bubble {
+        position: absolute;
+        bottom: 100%;
+        transform: translateX(-50%);
+        pointer-events: none;
+        background: rgba(28, 28, 28, 0.9);
+        color: #fff;
+        padding: 5px 10px;
+        border-radius: 4px;
+        font-size: 13px;
+        margin-bottom: 6px;
+        white-space: nowrap;
+        display: none;
+      }
+      .progress.show-bubble .bubble {
+        display: block;
+      }
+      .top-center {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        pointer-events: none;
+      }
+      .bigplay {
+        width: 68px;
+        height: 68px;
+        border-radius: 50%;
+        background: rgba(0, 0, 0, 0.6);
+        backdrop-filter: blur(8px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: opacity 0.3s;
+      }
+      .osd {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(28, 28, 28, 0.9);
+        color: #fff;
+        padding: 8px 16px;
+        border-radius: 4px;
+        font-size: 14px;
+        opacity: 0;
+        transition: 0.2s;
+        pointer-events: none;
+      }
+      .osd.show {
+        opacity: 1;
+      }
+      .tap-left,
+      .tap-right {
+        position: absolute;
+        inset: 0 50% 0 0;
+        display: none;
+      }
+      .tap-right {
+        left: auto;
+        right: 0;
+      }
+      .player.touch .tap-left,
+      .player.touch .tap-right {
+        display: block;
+      }
+      .badge {
+        position: absolute;
+        bottom: 56px;
+        left: 16px;
+        background: rgba(0, 0, 0, 0.55);
+        padding: 2px 6px;
+        border-radius: 6px;
+        font-size: 12px;
+        color: #fff;
+      }
+      .menus {
+        margin-left: auto;
+        position: relative;
+      }
+      .menu {
+        position: absolute;
+        right: 0;
+        bottom: 50px;
+        background: #282828;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+        min-width: 220px;
+        display: none;
+      }
+      .menu.open {
+        display: block;
+      }
+      .menu h4 {
+        margin: 8px 10px;
+        color: #aaa;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      .menu .item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 16px;
+        cursor: pointer;
+      }
+      .menu .item:hover {
+        background: #3d3d3d;
+      }
+      .pill {
+        background: #1f1f1f;
+        padding: 4px 12px;
+        border-radius: 999px;
+        color: #fff;
+        font-size: 13px;
+      }
+      .theater .player {
+        max-width: none;
+        width: 100%;
+        border-radius: 0;
+      }
+      @media (max-width: 760px) {
+        .vol {
+          min-width: 70px;
+        }
+        .time {
+          min-width: auto;
+        }
+        .row {
+          gap: 8px;
+        }
+        .btn {
+          width: 34px;
+          height: 34px;
+          border-radius: 999px;
+        }
+      }
+      @media (max-width: 480px) {
+        .controls {
+          padding: 8px;
+        }
+        .btn {
+          width: 32px;
+          height: 32px;
+        }
+        .vol {
+          min-width: 60px;
+        }
+        .time {
+          font-size: 12px;
+        }
+      }
+      .i {
+        width: 18px;
+        height: 18px;
+        display: inline-block;
+      }
+      .i svg {
+        width: 100%;
+        height: 100%;
+        fill: currentColor;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h2 class="title" id="videoTitle">Демо-видео</h2>
+      <div id="stage" class="player" aria-label="Видео" data-hide-timeout="3000">
+        <video id="video" preload="metadata" crossorigin="anonymous" playsinline></video>
+        <div class="top-center" aria-hidden="true">
+          <div
+            id="bigPlay"
+            class="bigplay btn"
+            style="pointer-events: auto"
+            title="Пуск/Пауза"
+            aria-label="Пуск/Пауза"
+          >
+            <span class="i" id="bpIcon"></span>
+          </div>
+        </div>
+        <div class="tap-left" id="tapLeft" aria-hidden="true"></div>
+        <div class="tap-right" id="tapRight" aria-hidden="true"></div>
+        <div class="osd" id="osd"></div>
+        <div class="badge" id="badge"></div>
+        <div class="controls" id="controls" role="group" aria-label="Управление видео">
+          <div class="bar">
+            <div
+              class="progress grow"
+              id="progress"
+              aria-label="Полоса воспроизведения"
+              role="slider"
+              tabindex="0"
+              aria-valuemin="0"
+              aria-valuemax="100"
+              aria-valuenow="0"
+            >
+              <div class="buf"></div>
+              <div class="cur"></div>
+              <div class="thumb"></div>
+              <div class="bubble" id="bubble">00:00</div>
+            </div>
+          </div>
+          <div class="row">
+            <button class="btn" id="play" aria-label="Воспроизвести/Пауза">
+              <span class="i" id="iPlay"></span>
+            </button>
+            <button class="btn" id="back10" title="Назад 10с (J/←)" aria-label="Назад 10 секунд">
+              <span class="i">
+                <svg
+                  width="31"
+                  height="31"
+                  viewBox="0 0 31 31"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <path
+                    d="M1.776 17.012C1.54133 17.012 1.344 16.9373 1.184 16.788C1.03467 16.628 0.96 16.436 0.96 16.212C0.96 15.9773 1.03467 15.7853 1.184 15.636C1.344 15.4867 1.54133 15.412 1.776 15.412H5.184C5.408 15.412 5.59467 15.4867 5.744 15.636C5.904 15.7853 5.984 15.9773 5.984 16.212C5.984 16.436 5.904 16.628 5.744 16.788C5.59467 16.9373 5.408 17.012 5.184 17.012H1.776Z"
+                    fill="white"
+                  />
+                  <g clip-path="url(#clip0_1549_1547)">
+                    <path
+                      d="M6.98999 11.22V12.9L9.98999 11.9V21.5H11.99V9.50002H11.74L6.98999 11.22ZM30.77 17.87C30.63 17.59 30.42 17.34 30.14 17.13C29.86 16.92 29.53 16.74 29.13 16.6C28.73 16.46 28.28 16.33 27.78 16.22C27.43 16.15 27.14 16.07 26.91 15.99C26.68 15.91 26.5 15.83 26.36 15.74C26.22 15.65 26.13 15.55 26.08 15.44C26.03 15.33 26 15.2 26 15.05C26 14.91 26.03 14.77 26.09 14.64C26.15 14.51 26.24 14.39 26.36 14.3C26.48 14.2 26.63 14.12 26.81 14.06C26.99 14 27.21 13.97 27.45 13.97C27.7 13.97 27.92 14.01 28.11 14.08C28.3 14.15 28.46 14.25 28.59 14.37C28.72 14.49 28.81 14.63 28.88 14.79C28.94 14.95 28.98 15.11 28.98 15.28H30.93C30.93 14.89 30.85 14.53 30.69 14.19C30.53 13.85 30.3 13.56 30 13.31C29.7 13.06 29.34 12.87 28.91 12.72C28.48 12.57 27.99 12.5 27.45 12.5C26.94 12.5 26.47 12.57 26.06 12.71C25.65 12.85 25.29 13.04 25 13.28C24.71 13.52 24.49 13.8 24.33 14.12C24.17 14.44 24.1 14.77 24.1 15.13C24.1 15.49 24.18 15.82 24.33 16.09C24.48 16.37 24.69 16.61 24.97 16.82C25.24 17.03 25.57 17.2 25.95 17.35C26.33 17.49 26.76 17.61 27.22 17.71C27.61 17.79 27.93 17.88 28.17 17.97C28.41 18.06 28.6 18.16 28.74 18.26C28.87 18.36 28.96 18.48 29.01 18.6C29.06 18.72 29.08 18.85 29.08 18.99C29.08 19.31 28.95 19.56 28.68 19.76C28.41 19.96 28.02 20.05 27.51 20.05C27.29 20.05 27.08 20.03 26.87 19.97C26.66 19.92 26.47 19.84 26.31 19.73C26.14 19.62 26.01 19.47 25.9 19.29C25.79 19.11 25.73 18.88 25.72 18.62H23.83C23.83 18.98 23.91 19.33 24.07 19.67C24.23 20.01 24.46 20.32 24.77 20.6C25.08 20.87 25.46 21.09 25.92 21.26C26.38 21.43 26.9 21.51 27.5 21.51C28.03 21.51 28.51 21.45 28.94 21.32C29.37 21.19 29.74 21.01 30.05 20.78C30.36 20.55 30.59 20.27 30.76 19.95C30.93 19.63 31.01 19.28 31.01 18.89C30.99 18.49 30.92 18.15 30.77 17.87V17.87ZM20.81 10.55C20.47 10.15 20.06 9.85002 19.58 9.67002C19.11 9.49002 18.57 9.40002 17.99 9.40002C17.41 9.40002 16.88 9.49002 16.4 9.67002C15.92 9.85002 15.51 10.14 15.17 10.55C14.83 10.96 14.57 11.48 14.38 12.14C14.2 12.79 14.1 13.59 14.1 14.53V16.45C14.1 17.39 14.19 18.19 14.38 18.84C14.57 19.5 14.83 20.03 15.18 20.44C15.52 20.85 15.93 21.15 16.41 21.33C16.89 21.51 17.42 21.61 18 21.61C18.59 21.61 19.12 21.52 19.59 21.33C20.07 21.15 20.47 20.85 20.81 20.44C21.15 20.03 21.41 19.5 21.59 18.84C21.77 18.19 21.87 17.39 21.87 16.45V14.53C21.87 13.59 21.78 12.79 21.59 12.14C21.41 11.48 21.15 10.95 20.81 10.55ZM19.89 16.72C19.89 17.32 19.85 17.83 19.77 18.25C19.69 18.67 19.57 19.01 19.41 19.27C19.25 19.53 19.05 19.72 18.82 19.84C18.59 19.96 18.31 20.02 18 20.02C17.7 20.02 17.42 19.96 17.18 19.84C16.94 19.72 16.74 19.53 16.58 19.27C16.42 19.01 16.29 18.67 16.2 18.25C16.11 17.83 16.07 17.32 16.07 16.72V14.22C16.07 13.62 16.11 13.11 16.2 12.7C16.29 12.29 16.41 11.96 16.58 11.7C16.74 11.45 16.94 11.27 17.18 11.15C17.42 11.04 17.69 10.98 17.99 10.98C18.3 10.98 18.57 11.04 18.8 11.15C19.04 11.26 19.24 11.44 19.4 11.7C19.56 11.95 19.69 12.28 19.77 12.69C19.85 13.1 19.9 13.61 19.9 14.21V16.72H19.89V16.72Z"
+                      fill="white"
+                    />
+                  </g>
+                  <defs>
+                    <clipPath id="clip0_1549_1547">
+                      <rect width="24" height="24" fill="white" transform="translate(7 3.5)" />
+                    </clipPath>
+                  </defs>
+                </svg>
+              </span>
+            </button>
+            <button class="btn" id="fwd10" title="Вперёд 10с (L/→)" aria-label="Вперёд 10 секунд">
+              <span class="i">
+                <svg
+                  width="34"
+                  height="34"
+                  viewBox="0 0 34 34"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <path
+                    d="M4.8 21.488C4.56533 21.488 4.384 21.424 4.256 21.296C4.128 21.1573 4.064 20.9707 4.064 20.736V18.112H1.488C1.264 18.112 1.088 18.0533 0.96 17.936C0.832 17.808 0.768 17.632 0.768 17.408C0.768 17.184 0.832 17.0133 0.96 16.896C1.088 16.768 1.264 16.704 1.488 16.704H4.064V14.16C4.064 13.9253 4.128 13.744 4.256 13.616C4.384 13.488 4.57067 13.424 4.816 13.424C5.05067 13.424 5.22667 13.488 5.344 13.616C5.472 13.744 5.536 13.9253 5.536 14.16V16.704H8.112C8.34667 16.704 8.52267 16.768 8.64 16.896C8.768 17.0133 8.832 17.184 8.832 17.408C8.832 17.632 8.768 17.808 8.64 17.936C8.52267 18.0533 8.34667 18.112 8.112 18.112H5.536V20.736C5.536 20.9707 5.472 21.1573 5.344 21.296C5.22667 21.424 5.04533 21.488 4.8 21.488Z"
+                    fill="white"
+                  />
+                  <g clip-path="url(#clip0_1549_1548)">
+                    <path
+                      d="M9.98999 12.72V14.4L12.99 13.4V23H14.99V11H14.74L9.98999 12.72ZM33.77 19.37C33.63 19.09 33.42 18.84 33.14 18.63C32.86 18.42 32.53 18.24 32.13 18.1C31.73 17.96 31.28 17.83 30.78 17.72C30.43 17.65 30.14 17.57 29.91 17.49C29.68 17.41 29.5 17.33 29.36 17.24C29.22 17.15 29.13 17.05 29.08 16.94C29.03 16.83 29 16.7 29 16.55C29 16.41 29.03 16.27 29.09 16.14C29.15 16.01 29.24 15.89 29.36 15.8C29.48 15.7 29.63 15.62 29.81 15.56C29.99 15.5 30.21 15.47 30.45 15.47C30.7 15.47 30.92 15.51 31.11 15.58C31.3 15.65 31.46 15.75 31.59 15.87C31.72 15.99 31.81 16.13 31.88 16.29C31.94 16.45 31.98 16.61 31.98 16.78H33.93C33.93 16.39 33.85 16.03 33.69 15.69C33.53 15.35 33.3 15.06 33 14.81C32.7 14.56 32.34 14.37 31.91 14.22C31.48 14.07 30.99 14 30.45 14C29.94 14 29.47 14.07 29.06 14.21C28.65 14.35 28.29 14.54 28 14.78C27.71 15.02 27.49 15.3 27.33 15.62C27.17 15.94 27.1 16.27 27.1 16.63C27.1 16.99 27.18 17.32 27.33 17.59C27.48 17.87 27.69 18.11 27.97 18.32C28.24 18.53 28.57 18.7 28.95 18.85C29.33 18.99 29.76 19.11 30.22 19.21C30.61 19.29 30.93 19.38 31.17 19.47C31.41 19.56 31.6 19.66 31.74 19.76C31.87 19.86 31.96 19.98 32.01 20.1C32.06 20.22 32.08 20.35 32.08 20.49C32.08 20.81 31.95 21.06 31.68 21.26C31.41 21.46 31.02 21.55 30.51 21.55C30.29 21.55 30.08 21.53 29.87 21.47C29.66 21.42 29.47 21.34 29.31 21.23C29.14 21.12 29.01 20.97 28.9 20.79C28.79 20.61 28.73 20.38 28.72 20.12H26.83C26.83 20.48 26.91 20.83 27.07 21.17C27.23 21.51 27.46 21.82 27.77 22.1C28.08 22.37 28.46 22.59 28.92 22.76C29.38 22.93 29.9 23.01 30.5 23.01C31.03 23.01 31.51 22.95 31.94 22.82C32.37 22.69 32.74 22.51 33.05 22.28C33.36 22.05 33.59 21.77 33.76 21.45C33.93 21.13 34.01 20.78 34.01 20.39C33.99 19.99 33.92 19.65 33.77 19.37V19.37ZM23.81 12.05C23.47 11.65 23.06 11.35 22.58 11.17C22.11 10.99 21.57 10.9 20.99 10.9C20.41 10.9 19.88 10.99 19.4 11.17C18.92 11.35 18.51 11.64 18.17 12.05C17.83 12.46 17.57 12.98 17.38 13.64C17.2 14.29 17.1 15.09 17.1 16.03V17.95C17.1 18.89 17.19 19.69 17.38 20.34C17.57 21 17.83 21.53 18.18 21.94C18.52 22.35 18.93 22.65 19.41 22.83C19.89 23.01 20.42 23.11 21 23.11C21.59 23.11 22.12 23.02 22.59 22.83C23.07 22.65 23.47 22.35 23.81 21.94C24.15 21.53 24.41 21 24.59 20.34C24.77 19.69 24.87 18.89 24.87 17.95V16.03C24.87 15.09 24.78 14.29 24.59 13.64C24.41 12.98 24.15 12.45 23.81 12.05ZM22.89 18.22C22.89 18.82 22.85 19.33 22.77 19.75C22.69 20.17 22.57 20.51 22.41 20.77C22.25 21.03 22.05 21.22 21.82 21.34C21.59 21.46 21.31 21.52 21 21.52C20.7 21.52 20.42 21.46 20.18 21.34C19.94 21.22 19.74 21.03 19.58 20.77C19.42 20.51 19.29 20.17 19.2 19.75C19.11 19.33 19.07 18.82 19.07 18.22V15.72C19.07 15.12 19.11 14.61 19.2 14.2C19.29 13.79 19.41 13.46 19.58 13.2C19.74 12.95 19.94 12.77 20.18 12.65C20.42 12.54 20.69 12.48 20.99 12.48C21.3 12.48 21.57 12.54 21.8 12.65C22.04 12.76 22.24 12.94 22.4 13.2C22.56 13.45 22.69 13.78 22.77 14.19C22.85 14.6 22.9 15.11 22.9 15.71V18.22H22.89V18.22Z"
+                      fill="white"
+                    />
+                  </g>
+                  <defs>
+                    <clipPath id="clip0_1549_1548">
+                      <rect width="24" height="24" fill="white" transform="translate(10 5)" />
+                    </clipPath>
+                  </defs>
+                </svg>
+              </span>
+            </button>
+            <div class="time label" id="time">00:00 / 00:00</div>
+            <div class="vol">
+              <button class="btn" id="mute" aria-label="Звук">
+                <span class="i" id="iMute"></span>
+              </button>
+              <input
+                type="range"
+                id="volume"
+                min="0"
+                max="1"
+                step="0.01"
+                value="1"
+                aria-label="Громкость"
+              />
+            </div>
+            <div class="menus">
+              <button class="btn" id="subBtn" aria-label="Субтитры (C)">
+                <span class="i">
+                  <svg viewBox="0 0 24 24">
+                    <path
+                      d="M4 6h16a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V8a2 2 0 012-2zm2 3v2h5V9H6zm11 0h-4v2h4V9zM6 13v2h8v-2H6zm10 0v2h2v-2h-2z"
+                    />
+                  </svg>
+                </span>
+              </button>
+              <button class="btn" id="gear" aria-label="Настройки">
+                <span class="i">
+                  <svg viewBox="0 0 24 24">
+                    <path
+                      d="M12 8a4 4 0 100 8 4 4 0 000-8zm9 4a7 7 0 01-.08 1.02l2.11 1.65-2 3.46-2.49-1a6.98 6.98 0 01-1.77 1.03l-.38 2.64H7.61l-.38-2.64A6.98 6.98 0 015.46 18l-2.49 1-2-3.46 2.11-1.65A7 7 0 013 12c0-.35.03-.69.08-1.02L1 9.33l2-3.46 2.49 1c.53-.4 1.12-.74 1.77-1.03L7.61 3h8.78l.38 2.64c.65.29 1.24.63 1.77 1.03l2.49-1 2 3.46-2.11 1.65c.05.33.08.67.08 1.02z"
+                    />
+                  </svg>
+                </span>
+              </button>
+              <div class="menu" id="menu">
+                <h4>Настройки</h4>
+                <div class="item" id="rateItem">
+                  <span>Скорость</span><span class="pill" id="rateVal">1×</span>
+                </div>
+                <div class="item" id="qualityItem">
+                  <span>Качество</span><span class="pill" id="qualityVal">Авто</span>
+                </div>
+                <div class="item" id="loopItem">
+                  <span>Повтор</span><span class="pill" id="loopVal">Выкл</span>
+                </div>
+              </div>
+            </div>
+            <button class="btn" id="theater" aria-label="Театр">
+              <span class="i">
+                <svg viewBox="0 0 24 24">
+                  <path
+                    d="M3 5h8v2H5v6H3V5zm16 0h2v8h-2V7h-6V5h6zM3 19h8v-2H5v-6H3v8zm16-8h2v8h-8v-2h6v-6z"
+                  />
+                </svg>
+              </span>
+            </button>
+            <button class="btn" id="pip" aria-label="Картинка-в-картинке">
+              <span class="i">
+                <svg viewBox="0 0 24 24">
+                  <path
+                    d="M21 5H3a2 2 0 00-2 2v10a2 2 0 002 2h18a2 2 0 002-2V7a2 2 0 00-2-2zM13 15H4v-5h9v5z"
+                  />
+                </svg>
+              </span>
+            </button>
+            <button class="btn" id="fs" aria-label="На весь экран (F)">
+              <span class="i" id="iFS"></span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script>
+      (function () {
+        const qs = new URLSearchParams(location.search);
+        const SRC =
+          qs.get('src') ||
+          'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
+        const POSTER =
+          qs.get('poster') ||
+          'https://peach.blender.org/wp-content/uploads/title_anouncement.jpg?x11217';
+        const TITLE = qs.get('title') || 'Big Buck Bunny (demo)';
+        const TRACKS = qs.get('tracks'); // vtt,label;vtt2,label
+        const SOURCES = qs.get('sources'); // label,url|label2,url2 (mp4 or m3u8)
+        const els = {
+          stage: document.getElementById('stage'),
+          video: document.getElementById('video'),
+          title: document.getElementById('videoTitle'),
+          play: document.getElementById('play'),
+          iPlay: document.getElementById('iPlay'),
+          back10: document.getElementById('back10'),
+          fwd10: document.getElementById('fwd10'),
+          time: document.getElementById('time'),
+          mute: document.getElementById('mute'),
+          iMute: document.getElementById('iMute'),
+          volume: document.getElementById('volume'),
+          progress: document.getElementById('progress'),
+          bubble: document.getElementById('bubble'),
+          gear: document.getElementById('gear'),
+          menu: document.getElementById('menu'),
+          rateItem: document.getElementById('rateItem'),
+          qualityItem: document.getElementById('qualityItem'),
+          loopItem: document.getElementById('loopItem'),
+          loopVal: document.getElementById('loopVal'),
+          rateVal: document.getElementById('rateVal'),
+          qualityVal: document.getElementById('qualityVal'),
+          subBtn: document.getElementById('subBtn'),
+          theater: document.getElementById('theater'),
+          pip: document.getElementById('pip'),
+          fs: document.getElementById('fs'),
+          iFS: document.getElementById('iFS'),
+          osd: document.getElementById('osd'),
+          badge: document.getElementById('badge'),
+          bigPlay: document.getElementById('bigPlay'),
+          bpIcon: document.getElementById('bpIcon'),
+          tapLeft: document.getElementById('tapLeft'),
+          tapRight: document.getElementById('tapRight'),
+          controls: document.getElementById('controls'),
+        };
+        function setIcon(el, type) {
+          const icons = {
+            play: '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>',
+            pause: '<svg viewBox="0 0 24 24"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>',
+            vol: '<svg viewBox="0 0 24 24"><path d="M5 9v6h4l5 4V5L9 9H5z"/></svg>',
+            mute: '<svg viewBox="0 0 24 24"><path d="M5 9v6h4l5 4V5L9 9H5zm9.59 3l2.12 2.12 1.41-1.41L16 10.17l2.12-2.12-1.41-1.41L14.59 8.76l-2.12-2.12-1.41 1.41L13.17 10l-2.12 2.12 1.41 1.41 2.12-2.12z"/></svg>',
+            enterfs:
+              '<svg viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm0-4h3V7h2v5H7V10zm7 7h5v-5h-2v3h-3v2zm3-10V7h-3V5h5v5h-2z"/></svg>',
+            exitfs:
+              '<svg viewBox="0 0 24 24"><path d="M7 16h3v2H5v-5h2v3zm0-8V5h5v2H9v3H7zm8 8v-3h2v5h-5v-2h3zm0-8h-3V6h5v5h-2V8z"/></svg>',
+          };
+          el.innerHTML = icons[type];
+        }
+        setIcon(els.iPlay, 'play');
+        setIcon(els.bpIcon, 'play');
+        setIcon(els.iMute, 'vol');
+        setIcon(els.iFS, 'enterfs');
+        const video = els.video;
+        const sourceList = [];
+        if (SOURCES) {
+          SOURCES.split('|').forEach((pair) => {
+            const [label, url] = pair.split(',');
+            if (url) sourceList.push({ label: label || 'Источник', url: url.trim() });
+          });
+        } else {
+          sourceList.push({ label: 'MP4 720p', url: SRC });
+        }
+        function applyTracks() {
+          if (TRACKS) {
+            TRACKS.split(';').forEach((line) => {
+              const [src, label] = line.split(',');
+              if (!src) return;
+              const t = document.createElement('track');
+              t.kind = 'subtitles';
+              t.srclang = 'en';
+              t.label = label || 'Subtitles';
+              t.src = src.trim();
+              t.default = !video.querySelector('track');
+              video.appendChild(t);
+            });
+          }
+        }
+        let hls = null;
+        async function loadSource(url) {
+          const t = url.trim().toLowerCase();
+          const at = !video.paused;
+          const cur = video.currentTime || 0;
+          const wasMuted = video.muted;
+          const vol = video.volume;
+          if (hls) {
+            hls.destroy();
+            hls = null;
+          }
+          if (t.endsWith('.m3u8')) {
+            if (!('MediaSource' in window) || !('fetch' in window)) {
+              toast('Браузер не поддерживает HLS');
+            }
+            if (!window.Hls) {
+              await new Promise((res, rej) => {
+                const s = document.createElement('script');
+                s.src = 'https://cdn.jsdelivr.net/npm/hls.js@1.5.7/dist/hls.min.js';
+                s.onload = res;
+                s.onerror = rej;
+                document.head.appendChild(s);
+              });
+            }
+            if (window.Hls && window.Hls.isSupported()) {
+              hls = new window.Hls({ maxBufferLength: 30 });
+              hls.loadSource(url);
+              hls.attachMedia(video);
+            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+              video.src = url;
+            } else {
+              toast('HLS не поддерживается');
+            }
+          } else {
+            video.src = url;
+          }
+          video.muted = wasMuted;
+          video.volume = vol;
+          video.addEventListener(
+            'loadedmetadata',
+            () => {
+              if (cur > 0) {
+                try {
+                  video.currentTime = cur;
+                } catch {}
+              }
+              if (at) video.play().catch(() => {});
+              updateDur();
+            },
+            { once: true },
+          );
+        }
+        els.title.textContent = TITLE;
+        video.poster = POSTER;
+        applyTracks();
+        loadSource(sourceList[0].url);
+        els.qualityVal.textContent = sourceList[0].label || 'Авто';
+        let hideTimer = null;
+        let raf = null;
+        let isScrubbing = false;
+        let holdingFast = false;
+        let lastTap = { t: 0, x: 0 };
+        const hideDelay = parseInt(els.stage.dataset.hideTimeout || '3000', 10);
+        function fmt(t) {
+          t = Math.max(0, t | 0);
+          const h = (t / 3600) | 0;
+          const m = ((t % 3600) / 60) | 0;
+          const s = t % 60;
+          const pad = (n) => String(n).padStart(2, '0');
+          return h ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
+        }
+        function updateDur() {
+          const cur = video.currentTime || 0,
+            dur = isFinite(video.duration) ? video.duration : 0;
+          els.time.textContent = `${fmt(cur)} / ${fmt(dur || 0)}`;
+          const p = dur ? cur / dur : 0;
+          els.progress.querySelector('.cur').style.transform = `scaleX(${p})`;
+          els.progress.querySelector('.thumb').style.left = `${p * 100}%`;
+          let buf = 0;
+          try {
+            for (let i = 0; i < video.buffered.length; i++) {
+              const end = video.buffered.end(i);
+              if (end > buf) buf = end;
+            }
+          } catch {}
+          const pb = dur ? buf / dur : 0;
+          els.progress.querySelector('.buf').style.transform = `scaleX(${pb})`;
+          els.progress.setAttribute('aria-valuenow', Math.round(p * 100));
+        }
+        function loop() {
+          updateDur();
+          raf = requestAnimationFrame(loop);
+        }
+        function startRAF() {
+          if (!raf) raf = requestAnimationFrame(loop);
+        }
+        function stopRAF() {
+          if (raf) cancelAnimationFrame(raf);
+          raf = null;
+        }
+        function showUI() {
+          els.stage.classList.remove('hide-ui');
+          clearTimeout(hideTimer);
+          if (!video.paused)
+            hideTimer = setTimeout(() => els.stage.classList.add('hide-ui'), hideDelay);
+        }
+        function forceShow() {
+          els.stage.classList.remove('hide-ui');
+          clearTimeout(hideTimer);
+        }
+        function setPlayUI() {
+          const playing = !video.paused && !video.ended;
+          setIcon(els.iPlay, playing ? 'pause' : 'play');
+          setIcon(els.bpIcon, playing ? 'pause' : 'play');
+          els.bigPlay.style.opacity = playing ? 0 : 1;
+          els.bigPlay.style.pointerEvents = playing ? 'none' : 'auto';
+          playing ? startRAF() : stopRAF();
+          showUI();
+        }
+        function toast(msg) {
+          els.osd.textContent = msg;
+          els.osd.classList.add('show');
+          setTimeout(() => els.osd.classList.remove('show'), 600);
+        }
+        function togglePlay() {
+          video.paused ? video.play() : video.pause();
+        }
+        function seekBy(d) {
+          video.currentTime = Math.max(
+            0,
+            Math.min(video.duration || 0, (video.currentTime || 0) + d),
+          );
+        }
+        function setRate(r) {
+          video.playbackRate = r;
+          els.rateVal.textContent = r.toFixed(2).replace(/\.00$/, '') + '×';
+          toast(els.rateVal.textContent);
+        }
+        function toggleLoop() {
+          video.loop = !video.loop;
+          els.loopVal.textContent = video.loop ? 'Вкл' : 'Выкл';
+        }
+        function toggleFS() {
+          if (!document.fullscreenElement) {
+            els.stage.requestFullscreen?.();
+            setIcon(els.iFS, 'exitfs');
+          } else {
+            document.exitFullscreen?.();
+            setIcon(els.iFS, 'enterfs');
+          }
+        }
+        function toggleTheater() {
+          document.body.classList.toggle('theater');
+        }
+        async function togglePiP() {
+          try {
+            if (document.pictureInPictureElement) {
+              await document.exitPictureInPicture();
+            } else if (document.pictureInPictureEnabled) {
+              await video.requestPictureInPicture();
+            } else toast('PiP не поддерживается');
+          } catch (e) {
+            toast('PiP: ' + e.message);
+          }
+        }
+        function toggleMute() {
+          video.muted = !video.muted;
+        }
+        function updateMuteUI() {
+          setIcon(els.iMute, video.muted || video.volume === 0 ? 'mute' : 'vol');
+        }
+        function posToTime(clientX) {
+          const r = els.progress.getBoundingClientRect();
+          const p = Math.min(1, Math.max(0, (clientX - r.left) / r.width));
+          const dur = isFinite(video.duration) ? video.duration : 0;
+          return p * dur;
+        }
+        function onScrub(e) {
+          const x = e.touches ? e.touches[0].clientX : e.clientX;
+          const t = posToTime(x);
+          isScrubbing = true;
+          forceShow();
+          els.progress.classList.add('show-bubble');
+          els.bubble.style.left =
+            ((x - els.progress.getBoundingClientRect().left) / els.progress.clientWidth) * 100 +
+            '%';
+          els.bubble.textContent = fmt(t);
+        }
+        function endScrub(e) {
+          if (!isScrubbing) return;
+          const x = e.changedTouches ? e.changedTouches[0].clientX : e.clientX;
+          const t = posToTime(x);
+          if (video.readyState >= 2) {
+            video.currentTime = t;
+          } else {
+            const seeker = () => {
+              video.currentTime = t;
+            };
+            video.addEventListener('canplay', seeker, { once: true });
+          }
+          isScrubbing = false;
+          els.progress.classList.remove('show-bubble');
+          showUI();
+        }
+        function handleTap(side) {
+          seekBy(side === 'left' ? -10 : 10);
+          toast((side === 'left' ? '−' : '+') + '10с');
+        }
+        function setupTouch() {
+          els.stage.classList.add('touch');
+          const onTap = (side) => (ev) => {
+            const now = Date.now();
+            const dt = now - lastTap.t;
+            lastTap.t = now;
+            if (dt < 300) {
+              handleTap(side);
+            } else {
+              showUI();
+            }
+          };
+          els.tapLeft.addEventListener('touchend', onTap('left'));
+          els.tapRight.addEventListener('touchend', onTap('right'));
+          const holdStart = () => {
+            holdingFast = true;
+            video.playbackRate = 2;
+            els.badge.textContent = '2×';
+            els.badge.style.display = 'block';
+          };
+          const holdEnd = () => {
+            if (holdingFast) {
+              holdingFast = false;
+              video.playbackRate = 1;
+              els.badge.style.display = 'none';
+            }
+          };
+          ['touchstart', 'mousedown'].forEach((evt) => {
+            els.stage.addEventListener(evt, (e) => {
+              if (e.target.closest('.controls') || e.target.closest('.menu')) return;
+              this._holdTimer = setTimeout(holdStart, 400);
+            });
+          });
+          ['touchend', 'mouseup', 'mouseleave', 'touchcancel'].forEach((evt) => {
+            els.stage.addEventListener(evt, () => {
+              clearTimeout(this._holdTimer);
+              holdEnd();
+            });
+          });
+        }
+        if ('ontouchstart' in window) setupTouch();
+        els.stage.addEventListener('mousemove', showUI);
+        els.stage.addEventListener('mouseleave', () => {
+          if (!video.paused) els.stage.classList.add('hide-ui');
+        });
+        els.bigPlay.addEventListener('click', togglePlay);
+        els.play.addEventListener('click', togglePlay);
+        video.addEventListener('play', setPlayUI);
+        video.addEventListener('pause', setPlayUI);
+        video.addEventListener('loadedmetadata', updateDur);
+        video.addEventListener('timeupdate', updateDur);
+        video.addEventListener('volumechange', updateMuteUI);
+        video.addEventListener('ended', () => {
+          setPlayUI();
+          showUI();
+        });
+        els.back10.addEventListener('click', () => seekBy(-10));
+        els.fwd10.addEventListener('click', () => seekBy(10));
+        els.mute.addEventListener('click', toggleMute);
+        els.volume.addEventListener('input', (e) => {
+          video.volume = parseFloat(e.target.value);
+          video.muted = video.volume === 0;
+        });
+        els.progress.addEventListener('mousedown', (e) => {
+          onScrub(e);
+        });
+        window.addEventListener('mousemove', (e) => {
+          if (isScrubbing) onScrub(e);
+        });
+        window.addEventListener('mouseup', endScrub);
+        els.progress.addEventListener(
+          'touchstart',
+          (e) => {
+            onScrub(e);
+          },
+          { passive: true },
+        );
+        window.addEventListener(
+          'touchmove',
+          (e) => {
+            if (isScrubbing) onScrub(e);
+          },
+          { passive: true },
+        );
+        window.addEventListener('touchend', endScrub);
+        window.addEventListener('keydown', (e) => {
+          if (e.target && /input|textarea|select/i.test(e.target.tagName)) return;
+          switch (e.key.toLowerCase()) {
+            case 'k':
+            case ' ':
+              togglePlay();
+              e.preventDefault();
+              break;
+            case 'j':
+              seekBy(-10);
+              break;
+            case 'l':
+              seekBy(10);
+              break;
+            case 'arrowleft':
+              seekBy(-5);
+              break;
+            case 'arrowright':
+              seekBy(5);
+              break;
+            case 'm':
+              toggleMute();
+              break;
+            case 'f':
+              toggleFS();
+              break;
+            case 'c':
+              toggleSubtitles();
+              break;
+            case ',':
+              setRate(Math.max(0.25, video.playbackRate - 0.25));
+              break;
+            case '.':
+              setRate(Math.min(3, video.playbackRate + 0.25));
+              break;
+            case 'i':
+              toggleStats();
+              break;
+          }
+        });
+        function toggleMenu() {
+          els.menu.classList.toggle('open');
+        }
+        function closeMenu() {
+          els.menu.classList.remove('open');
+        }
+        els.gear.addEventListener('click', () => {
+          toggleMenu();
+          showUI();
+        });
+        document.addEventListener('click', (e) => {
+          if (!e.target.closest('.menus')) closeMenu();
+        });
+        els.rateItem.addEventListener('click', () => {
+          const list = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5];
+          const i = Math.max(0, list.indexOf(video.playbackRate));
+          setRate(list[(i + 1) % list.length]);
+          showUI();
+        });
+        els.qualityItem.addEventListener('click', () => {
+          if (sourceList.length <= 1) {
+            toast('Доступен один источник');
+            return;
+          }
+          const cur = sourceList.findIndex((s) => s.url === (hls ? hls.url : video.currentSrc));
+          const next = (cur + 1) % sourceList.length;
+          els.qualityVal.textContent = sourceList[next].label || 'Источник';
+          loadSource(sourceList[next].url);
+          showUI();
+        });
+        els.loopItem.addEventListener('click', () => {
+          toggleLoop();
+          showUI();
+        });
+        function toggleSubtitles() {
+          const tracks = Array.from(video.textTracks || []);
+          if (!tracks.length) {
+            toast('Нет субтитров');
+            return;
+          }
+          const anyOn = tracks.some((t) => t.mode === 'showing');
+          tracks.forEach((t) => (t.mode = anyOn ? 'disabled' : 'showing'));
+          toast(anyOn ? 'Субтитры: выкл' : 'Субтитры: вкл');
+        }
+        els.subBtn.addEventListener('click', toggleSubtitles);
+        els.fs.addEventListener('click', toggleFS);
+        els.theater.addEventListener('click', toggleTheater);
+        els.pip.addEventListener('click', togglePiP);
+        els.stage.addEventListener('click', (e) => {
+          if (e.target.closest('.controls') || e.target.closest('.menu')) return;
+          if (!('ontouchstart' in window)) togglePlay();
+        });
+        setRate(1);
+        updateMuteUI();
+        startRAF();
+      })();
+    </script>
+  </body>
+</html>
