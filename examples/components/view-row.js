@@ -149,7 +149,7 @@ class ViewRow extends HTMLElement {
     if (this._loading || this._ended) return;
     this._loading = true;
     try {
-      const first = this._page * BATCH + 1;
+      const first = this._page * BATCH;
       const last = (this._page + 1) * BATCH;
 
       const sp = new URLSearchParams({

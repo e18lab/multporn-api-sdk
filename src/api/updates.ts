@@ -29,7 +29,7 @@ export async function updates(
   const viewName: ViewName = (params.view_name as ViewName) ?? ('new_mini' as ViewName);
 
   const preset = VIEW_PRESETS[viewName] || {};
-  const first = Number(params.first ?? 1);
+  const first = Number(params.first ?? 0);
   const last  = Number(params.last  ?? 8);
 
   const basePayload = {
