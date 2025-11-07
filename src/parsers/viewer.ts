@@ -108,29 +108,46 @@ export function parseInlineJuiceboxFromHtml(html: string): ViewerImage[] {
   return out;
 }
 
-
 function parseBreadcrumbs(html: string, baseURL: string): LinkItem[] {
   const block = textBetween(html, /<div[^>]+class="breadcrumb"[^>]*>/i, '</div>');
   return block ? collectLinks(block, baseURL) : [];
 }
 
-function parseLabeledField(html: string, labelStartsWith: string): string | null {
+function findLabeledFieldBlock(html: string, labelStartsWith: string): string | null {
+  const esc = labelStartsWith.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const re = new RegExp(
-    `<h3[^>]*class="[^"]*field-label[^"]*"[^>]*>\\s*${labelStartsWith}\\s*:?\\s*<\\/h3>`,
+    `<(?:h3|div)[^>]*class="[^"]*field-label[^"]*"[^>]*>\\s*${esc}\\s*:?\\s*<\\/[^>]+>`,
     'i',
   );
   const idx = html.search(re);
   if (idx < 0) return null;
+
   const open = html.lastIndexOf('<div', idx);
-  const close = html.indexOf('</div>', idx);
-  if (open < 0 || close < 0) return null;
-  return html.slice(open, close + 6);
+  let depth = 0;
+  for (let i = open; i < html.length; i++) {
+    if (html.startsWith('<div', i)) depth++;
+    if (html.startsWith('</div>', i)) {
+      depth--;
+      if (depth === 0) {
+        return html.slice(open, i + 6);
+      }
+    }
+  }
+  return null;
 }
 
-function parseNumberFromText(html: string, label: string): number | undefined {
-  const block = parseLabeledField(html, label);
-  if (!block) return undefined;
-  return parseNumberLike(block);
+function parseLabeledField(html: string, labelStartsWith: string): string | null {
+  return findLabeledFieldBlock(html, labelStartsWith);
+}
+
+function parsePlainValuesFromLabeledField(html: string, label: string): string[] {
+  const block = findLabeledFieldBlock(html, label);
+  if (!block) return [];
+  const text = normSpace(decodeHtml(stripTags(block)))
+    .replace(new RegExp(`^${label}\\s*:?\\s*`, 'i'), '')
+    .trim();
+  if (!text) return [];
+  return text.split(/\s*[,;]\s*/).filter(Boolean);
 }
 
 function parseTitle(html: string): string {
@@ -142,25 +159,60 @@ function parseTitle(html: string): string {
 }
 
 function parseVotesAndRating(html: string): { rating?: number; votes?: number } {
-  const mBlock =
-    /class="fivestar-summary[\s\S]*?Average:\s*<span>([\d.,]+)<\/span>[\s\S]*?\(\s*<span>(\d+)<\/span>\s*votes?\s*\)/i.exec(
+  const block =
+    /<div[^>]*class="[^"]*\bfivestar-summary\b[^"]*"[^>]*>([\s\S]*?)<\/div>/i.exec(html)?.[1] ||
+    /<div[^>]*class="[^"]*\bfivestar-average[^"]*"[^>]*>([\s\S]*?)<\/div>/i.exec(html)?.[1] ||
+    '';
+
+  if (block) {
+    const mAvg =
+      /class="average-rating"[^>]*>[\s\S]*?Average[^:]*:\s*(?:<span[^>]*>)?([\d.,]+)(?:<\/span>)?/i.exec(
+        block,
+      );
+    const mVotes =
+      /class="total-votes"[^>]*>\s*\(\s*(?:<span[^>]*>)?(\d+)(?:<\/span>)?\s+votes?\s*\)/i.exec(
+        block,
+      );
+
+    const rating = mAvg ? parseNumberLike(mAvg[1]) : undefined;
+    const votes = mVotes ? parseIntLike(mVotes[1]) : undefined;
+    if (rating != null || votes != null) return { rating, votes };
+  }
+
+  const m1 =
+    /Average\s*:\s*(?:<span[^>]*>)?([\d.,]+)(?:<\/span>)?[\s\S]*?\(\s*(?:<span[^>]*>)?(\d+)(?:<\/span>)?\s*votes?\s*\)/i.exec(
       html,
     );
-  if (mBlock) {
+  if (m1) {
     return {
-      rating: parseNumberLike(mBlock[1]),
-      votes: parseIntLike(mBlock[2]),
+      rating: parseNumberLike(m1[1]),
+      votes: parseIntLike(m1[2]),
     };
   }
+
+  const m2 = /Average[^<>\d]*([\d.,]+)/i.exec(html);
+  const m3 = /\((\d+)\s+votes?\)/i.exec(html);
+  if (m2 || m3) {
+    const rating = m2 ? parseNumberLike(m2[1]) : undefined;
+    const votes = m3 ? parseIntLike(m3[1]) : undefined;
+    return { rating, votes };
+  }
+
   return {};
 }
 
 function parseViews(html: string): number | undefined {
-  const m =
-    /<li[^>]*class="statistics_counter[^"]*"[^>]*>\s*<span>\s*([\d\s.,]+)\s+views\s*<\/span>/i.exec(
-      html,
-    );
-  return m ? parseIntLike(m[1]) : undefined;
+  const patterns: RegExp[] = [
+    /<li[^>]*class="statistics_counter[^"]*"[^>]*>\s*<span>\s*([\d\s.,]+)\s+views\s*<\/span>/i,
+    />\s*([\d\s.,]+)\s+views\s*<\/(?:span|div|li|h\d)>/i,
+    />\s*Views\s*[:\-]?\s*<\/?(?:span|strong|b)?[^>]*>\s*([\d\s.,]+)\s*</i,
+    /\bViews\s*[:\-]?\s*([\d\s.,]+)/i,
+  ];
+  for (const rx of patterns) {
+    const m = rx.exec(html);
+    if (m && m[1]) return parseIntLike(m[1]);
+  }
+  return undefined;
 }
 
 function parseLinksFromLabeledField(html: string, baseURL: string, label: string): LinkItem[] {
@@ -177,6 +229,36 @@ function parseRelated(html: string, baseURL: string): LinkItem[] {
   return uniq(pieces.flatMap((p) => collectLinks(p, baseURL)));
 }
 
+function parseUploader(
+  html: string,
+  baseURL: string,
+):
+  | {
+      name?: string;
+      url?: string;
+      avatar?: string;
+      dateText?: string;
+    }
+  | undefined {
+  const m = /<footer[^>]*class="[^"]*\bsubmitted\b[^"]*"[^>]*>([\s\S]*?)<\/footer>/i.exec(html);
+  if (!m) return undefined;
+  const block = m[1];
+
+  const a = /Uploaded\s+by\s*<a[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>\s*on\s*([^<]+)/i.exec(
+    block,
+  );
+  const img = /<div[^>]*class="user-picture"[^>]*>[\s\S]*?<img[^>]*src="([^"]+)"/i.exec(block);
+
+  const out: { name?: string; url?: string; avatar?: string; dateText?: string } = {};
+  if (a) {
+    out.url = absUrl(baseURL, a[1]) ?? '';
+    out.name = normSpace(decodeHtml(stripTags(a[2])));
+    out.dateText = normSpace(decodeHtml(a[3]));
+  }
+  if (img) out.avatar = absUrl(baseURL, img[1]) ?? '';
+  return out;
+}
+
 export function parseViewerMeta(
   html: string,
   baseURL: string,
@@ -188,9 +270,32 @@ export function parseViewerMeta(
 } {
   const title = parseTitle(html);
   const breadcrumbs = parseBreadcrumbs(html, baseURL);
-  const authors = parseLinksFromLabeledField(html, baseURL, 'Author');
-  const sections = parseLinksFromLabeledField(html, baseURL, 'Section');
-  const tags = parseLinksFromLabeledField(html, baseURL, 'Tags');
+
+  let authors = parseLinksFromLabeledField(html, baseURL, 'Author');
+  if (authors.length === 0) {
+    const altLinks = parseLinksFromLabeledField(html, baseURL, "Artist's name");
+    if (altLinks.length) authors = altLinks;
+    if (authors.length === 0) {
+      const altPlain = parsePlainValuesFromLabeledField(html, "Artist's name");
+      if (altPlain.length) {
+        authors = altPlain.map((t) => ({ title: t, url: '' }));
+      }
+    }
+  }
+
+  let sections = parseLinksFromLabeledField(html, baseURL, 'Section');
+  if (sections.length === 0) {
+    const sPlain = parsePlainValuesFromLabeledField(html, 'Section');
+    if (sPlain.length) sections = sPlain.map((t) => ({ title: t, url: '' }));
+  }
+
+  let tags = parseLinksFromLabeledField(html, baseURL, 'Tags');
+  if (tags.length === 0) {
+    const block =
+      /<div[^>]*class="[^"]*field-name-field-category[^"]*"[^>]*>([\s\S]*?)<\/div>/i.exec(html);
+    if (block) tags = collectLinks(block[1], baseURL);
+  }
+
   const characters = parseLinksFromLabeledField(html, baseURL, 'Characters');
   const userTags = parseLinksFromLabeledField(html, baseURL, 'User tags');
   const { rating, votes } = parseVotesAndRating(html);
@@ -198,6 +303,7 @@ export function parseViewerMeta(
 
   const kind: ViewerKind = guessKindFromPath(absoluteUrl);
   const field = findFieldNodeAndSys(html);
+  const uploader = parseUploader(html, baseURL);
 
   const meta: ViewerMeta = {
     nodeId: field?.nodeId ?? null,
@@ -215,6 +321,10 @@ export function parseViewerMeta(
     views,
     related: parseRelated(html, baseURL),
   };
+
+  if (uploader) {
+    (meta as any).uploader = uploader;
+  }
 
   return { meta, nodeId: meta.nodeId, fieldSys: meta.fieldSys };
 }
@@ -253,7 +363,6 @@ function stripExcludedBlocks(html: string): string {
     /<div[^>]+class="[^"]*\bmore\b[^"]*"[^>]*>[\s\S]*?<\/div>/gi,
     /<div[^>]+class="[^"]*\bmore-comics\b[^"]*"[^>]*>[\s\S]*?<\/div>/gi,
     /<div[^>]+class="[^"]*\bpane-related\b[^"]*"[^>]*>[\s\S]*?<\/div>/gi,
-    /<div[^>]+class="[^"]*\bsimilar\b[^"]*"[^>]*>[\s\S]*?<\/div>/gi,
 
     /<aside[\s\S]*?<\/aside>/gi,
     /<div[^>]+class="[^"]*\bsidebar\b[^"]*"[^>]*>[\s\S]*?<\/div>/gi,

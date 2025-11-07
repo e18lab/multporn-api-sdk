@@ -62,6 +62,28 @@ function proxyVidMaybe(u: string, opts?: ResolveOptions): string {
   return proxyVideo ? proxyVideo(u) : proxyImgMaybe(u, opts);
 }
 
+function tryParseRichMeta(html: string, baseURL: string, absoluteUrl: string): ViewerMeta {
+  const anyParsers = viewerParsers as unknown as {
+    parseViewerMeta?: (
+      h: string,
+      b: string,
+      abs: string,
+    ) => { meta: ViewerMeta; nodeId: number | null; fieldSys: string | null };
+  };
+
+  if (typeof anyParsers.parseViewerMeta === 'function') {
+    try {
+      const { meta } = anyParsers.parseViewerMeta(html, baseURL, absoluteUrl);
+      if (!meta.title) {
+        const t = extractMeta(html, baseURL).title;
+        if (t) (meta as any).title = t;
+      }
+      return meta;
+    } catch {}
+  }
+  return extractMeta(html, baseURL);
+}
+
 function parseImagesWithBackoff(
   html: string,
   baseURL: string,
@@ -89,29 +111,16 @@ function parseImagesWithBackoff(
   return { meta, images };
 }
 
-function countOcc(html: string, rx: RegExp): number {
-  let c = 0;
-  rx.lastIndex = 0;
-  while (rx.exec(html)) c++;
-  return c;
-}
-
 function hasViewerClues(html: string): boolean {
   const hasJuicebox =
     /juicebox/i.test(html) || /\/juicebox\/xml\/field\/node\/\d+\/[a-z0-9_]+\/full/i.test(html);
   const hasFieldNode = /id=["']field--node--\d+--[a-z0-9_-]+--full["']/i.test(html);
   const hasJbStyles = /styles\/juicebox_(?:large|medium|small)\//i.test(html);
   const hasNodeBody = /<body[^>]+class=["'][^"']*\bnode\b[^"']*["']/i.test(html);
-  const hasGalleryField =
-    /field-name-(?:field_)?(?:pictures|images|image|post_pictures)\b/i.test(html);
+  const hasGalleryField = /field-name-(?:field_)?(?:pictures|images|image|post_pictures)\b/i.test(
+    html,
+  );
   return hasJuicebox || hasFieldNode || hasJbStyles || hasNodeBody || hasGalleryField;
-}
-
-function isStrongListing(html: string): boolean {
-  const rows = countOcc(html, /class=["'][^"']*\bviews-row\b[^"']*["']/gi);
-  const hasViewContent = /class=["'][^"']*\bview-content\b[^"']*["']/i.test(html);
-  const hasPager = /class=["'][^"']*\bpager\b[^"']*["']/i.test(html);
-  return (hasViewContent && rows >= 12) || hasPager; // подбиралось эмпирически
 }
 
 export const ViewerAPI = {
@@ -126,7 +135,7 @@ export const ViewerAPI = {
 
     const parsedVideo = parseVideoFromHtml(html, baseURL);
     if (parsedVideo && parsedVideo.sources?.length) {
-      const meta = extractMeta(html, baseURL);
+      const meta = tryParseRichMeta(html, baseURL, url);
       return {
         kind: 'video',
         meta,
@@ -176,7 +185,7 @@ export const ViewerAPI = {
 
     const parsedVideo = parseVideoFromHtml(html, baseURL);
     if (parsedVideo && parsedVideo.sources?.length) {
-      const meta = extractMeta(html, baseURL);
+      const meta = tryParseRichMeta(html, baseURL, url);
       const viewer: ViewerResult = {
         kind: 'video',
         meta,
@@ -233,12 +242,7 @@ export const ViewerAPI = {
 
       const data: ViewerPayload = { absoluteUrl: url, path, viewer };
       (data as any).recommendations = recommendations;
-      return { route: 'viewer', data: data as any  };
-    }
-
-    if (isStrongListing(html)) {
-      const page: Page<ListingItem> = await ListingsAPI.listByPath(http, baseURL, path, 0);
-      return { route: 'listing', data: { ...page, absoluteUrl: url, path } as any };
+      return { route: 'viewer', data: data as any };
     }
 
     const page: Page<ListingItem> = await ListingsAPI.listByPath(http, baseURL, path, 0);
@@ -249,6 +253,53 @@ export const ViewerAPI = {
 function extractText(html: string, re: RegExp) {
   const m = html.match(re);
   return m ? m[1].replace(/<[^>]*>/g, '').trim() : '';
+}
+
+function grabLinksByLabel(html: string, baseURL: string, label: string) {
+  const esc = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const reLbl = new RegExp(
+    `<(?:h3|div)[^>]*class=["'][^"']*field-label[^"']*["'][^>]*>\\s*${esc}\\s*:?\\s*<\\/[^>]+>`,
+    'i',
+  );
+  const idx = html.search(reLbl);
+  if (idx < 0) return [];
+
+  const open = html.lastIndexOf('<div', idx);
+  const close = html.indexOf('</div>', idx);
+  if (open < 0 || close < 0) return [];
+
+  const block = html.slice(open, close + 6);
+  const out: Array<{ title: string; url: string }> = [];
+  const reA = /<a[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  for (let m: RegExpExecArray | null; (m = reA.exec(block)); ) {
+    out.push({
+      title: m[2].replace(/<[^>]*>/g, '').trim(),
+      url: absolutize(m[1], baseURL),
+    });
+  }
+  return out;
+}
+
+function grabLinks(html: string, blockRe: RegExp, baseURL: string) {
+  const alt = `(?:${blockRe.source})`;
+  const reDiv = new RegExp(
+    `<div[^>]*class=["'][^"']*\\bfield\\b[^"']*\\b${alt}\\b[^"']*["'][^>]*>([\\s\\S]*?)<\\/div>`,
+    'i',
+  );
+
+  const m = reDiv.exec(html);
+  if (!m) return [];
+  const block = m[1];
+
+  const arr: Array<{ title: string; url: string }> = [];
+  const reA = /<a[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  for (let x: RegExpExecArray | null; (x = reA.exec(block)); ) {
+    arr.push({
+      title: x[2].replace(/<[^>]*>/g, '').trim(),
+      url: absolutize(x[1], baseURL),
+    });
+  }
+  return arr;
 }
 
 function extractMeta(html: string, baseURL: string): ViewerMeta {
@@ -266,17 +317,23 @@ function extractMeta(html: string, baseURL: string): ViewerMeta {
     });
   }
 
-  const authors = grabLinks(
-    html,
-    /field-name-field-vd-authors|field-name-field-authors|field-name-field-au/i,
-    baseURL,
-  );
+  let authors =
+    grabLinks(
+      html,
+      /field-name-field-vd-authors|field-name-field-authors|field-name-field-au/i,
+      baseURL,
+    ) || [];
+  if (authors.length === 0) {
+    authors = grabLinksByLabel(html, baseURL, 'Author');
+  }
+
   const sections = grabLinks(
     html,
     /field-name-field-vd-group|field-name-field-group|field-name-field-sections/i,
     baseURL,
   );
-  const tags = grabLinks(html, /field-name-field-(?:vd-)?tags/i, baseURL);
+  const tags =
+    grabLinks(html, /field-name-field-(?:vd-)?tags|field-name-field-category/i, baseURL) || [];
 
   const meta = {
     title,
@@ -290,21 +347,4 @@ function extractMeta(html: string, baseURL: string): ViewerMeta {
   } as unknown as ViewerMeta;
 
   return meta;
-}
-
-function grabLinks(html: string, blockRe: RegExp, baseURL: string) {
-  const m = html.match(
-    new RegExp(`<div[^>]*class=["']field[^"']*${blockRe.source}[^"']*["'][\\s\\S]*?<\\/div>`, 'i'),
-  );
-  if (!m) return [];
-  const block = m[0];
-  const arr: Array<{ title: string; url: string }> = [];
-  const reA = /<a[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
-  for (let x: RegExpExecArray | null; (x = reA.exec(block)); ) {
-    arr.push({
-      title: x[2].replace(/<[^>]*>/g, '').trim(),
-      url: absolutize(x[1], baseURL),
-    });
-  }
-  return arr;
 }

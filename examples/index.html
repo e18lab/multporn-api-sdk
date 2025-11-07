@@ -1,0 +1,497 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Multporn Dev Server</title>
+    <script type="module" src="/components/app-header.js"></script>
+    <script type="module" src="/components/card.js"></script>
+    <script type="module" src="/components/view-row.js"></script>
+    <style>
+      :root {
+        --bg: #0e1117;
+        --fg: #e6edf3;
+        --muted: #8b949e;
+        --card: #161b22;
+        --accent: #58a6ff;
+        --line: rgba(255, 255, 255, 0.08);
+        --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+        --border: rgba(255, 255, 255, 0.12);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        font-family:
+          system-ui,
+          Segoe UI,
+          Roboto,
+          Helvetica,
+          Arial,
+          sans-serif;
+        background: var(--bg);
+        color: var(--fg);
+        margin: 0;
+      }
+      a {
+        color: #9ecbff;
+        text-decoration: none;
+      }
+      .container {
+        max-width: 1100px;
+        margin: 0px auto 16px auto;
+        padding: 0 16px;
+      }
+      .loader {
+        position: fixed;
+        left: 0;
+        right: 0;
+        top: 0;
+        height: 3px;
+        background: linear-gradient(90deg, var(--accent), #8b949e);
+        transform: scaleX(0);
+        transform-origin: left;
+        transition: transform 0.25s ease;
+        z-index: 999;
+      }
+      .load-on .loader {
+        transform: scaleX(1);
+      }
+
+      .hero {
+        display: grid;
+        gap: 14px;
+        padding: 16px;
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        box-shadow: var(--shadow);
+        margin-top: 16px;
+      }
+      .title {
+        font-size: 20px;
+        font-weight: 700;
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      input,
+      button {
+        font: inherit;
+      }
+      input {
+        flex: 1;
+        min-width: 280px;
+        padding: 10px 12px;
+        border-radius: 12px;
+        border: 1px solid #2d333b;
+        background: #161b22;
+        color: var(--fg);
+      }
+      button {
+        padding: 10px 12px;
+        border-radius: 12px;
+        border: 1px solid #30363d;
+        background: #21262d;
+        color: var(--fg);
+        cursor: pointer;
+      }
+      button:hover {
+        border-color: #2e81ff;
+      }
+      .links {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      .tips {
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .home-rows {
+        display: block;
+        gap: 16px;
+      }
+      .home-rows view-row {
+        display: block;
+        margin-bottom: 16px;
+      }
+
+      .wrap {
+        max-width: 1200px;
+        margin: 0px auto 16px auto;
+        padding: 0 16px;
+      }
+
+      .hubbar {
+        display: none;
+        /* display: flex; */
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+        margin: 8px 0 12px;
+        padding: 8px;
+        background: #111822;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 10px;
+      }
+      .btn {
+        padding: 8px 12px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        background: #21262d;
+        color: #e6edf3;
+      }
+      .btn:hover {
+        border-color: var(--accent);
+      }
+
+      .sortbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        margin: 8px 0 12px;
+        padding: 8px;
+        background: #111822;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 10px;
+      }
+      .lbl {
+        display: block;
+        font-size: 12px;
+        color: #8b949e;
+        margin: 0 0 4px 2px;
+      }
+      .form-select {
+        padding: 6px 10px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        background: #161b22;
+        color: #e6edf3;
+      }
+
+      .alpha {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin: 8px 0 12px;
+      }
+      .alpha .a {
+        display: inline-block;
+        padding: 6px 10px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 8px;
+        background: #161b22;
+        color: #e6edf3;
+      }
+      .alpha .a.active {
+        border-color: #58a6ff;
+      }
+
+      tile-grid {
+        display: block;
+      }
+
+      .pager {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        justify-content: center;
+        margin: 14px 0;
+      }
+      .muted {
+        color: #8b949e;
+      }
+      .hidden {
+        display: none !important;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="loader" id="loader"></div>
+    <app-header id="hdr" title="Multporn Dev"></app-header>
+
+    <main id="home" class="container">
+      <section id="homeRows" class="home-rows"></section>
+    </main>
+
+    <div id="hub" class="wrap hidden">
+      <div id="hubBar" class="hubbar hidden">
+        <a id="rawBtn" class="btn" target="_blank" rel="noopener">Raw JSON</a>
+        <a id="siteBtn" class="btn" target="_blank" rel="noopener">Открыть на сайте</a>
+      </div>
+
+      <form id="sortForm" class="sortbar hidden"></form>
+      <div id="alpha" class="alpha hidden"></div>
+      <tile-grid id="hubGrid"></tile-grid>
+      <div id="pager" class="pager hidden"></div>
+    </div>
+
+    <script>
+      function show() {
+        document.body.classList.add('load-on');
+      }
+      function hide() {
+        document.body.classList.remove('load-on');
+      }
+      window.addEventListener('pageshow', hide);
+      window.addEventListener('app-nav-start', show);
+      document.addEventListener('click', (e) => {
+        const a = e.target.closest('a');
+        if (a && a.origin === location.origin) show();
+      });
+
+      const hdr = document.getElementById('hdr');
+      const sp = new URLSearchParams(location.search);
+      const isHub =
+        location.pathname === '/hub' ||
+        sp.has('path') ||
+        sp.has('url') ||
+        sp.has('letter') ||
+        sp.has('page');
+
+      function parseQuery() {
+        const q = {};
+        for (const [k, v] of new URLSearchParams(location.search)) q[k] = v;
+        return q;
+      }
+      function pathOf(v) {
+        try {
+          const u = new URL(String(v), location.origin);
+          return u.pathname || '/';
+        } catch {
+          const s = String(v || '/');
+          return s.startsWith('/') ? s : '/' + s.replace(/^\/+/, '');
+        }
+      }
+      function hubUrl(path, extras) {
+        const sp = new URLSearchParams();
+        Object.entries(extras || {}).forEach(([k, v]) => {
+          if (v == null || v === '') return;
+          if (k === 'path' || k === 'url') return;
+          sp.set(k, String(v));
+        });
+        const qs = sp.toString();
+        return '/hub?path=' + path + (qs ? '&' + qs : '');
+      }
+      function currentBasePath() {
+        const q = parseQuery();
+        return q.path || (q.url ? pathOf(q.url) : '/');
+      }
+      function linkToHub(linkStr) {
+        if (!linkStr) return '#';
+        const u = new URL(linkStr, location.origin);
+        const path = u.pathname || '/';
+        const extras = Object.fromEntries(u.searchParams.entries());
+        return hubUrl(path, extras);
+      }
+
+      const HOME_VIEWS = [
+        { title: 'Новое', view: 'new_mini', link: '/new' },
+        { title: 'Обновлённые комиксы', view: 'updated_comics', link: '/updated_comics' },
+        { title: 'Загрузки пользователей', view: 'user_upload_front', link: '/user_content' },
+        { title: 'Хентай манга', view: 'updated_manga', link: '/new?type=2&language=1' },
+        { title: 'Обновлённая манга', view: 'updated_manga_promoted', link: '/updated_manga' },
+        { title: 'Случайные топ-комиксы', view: 'random_top_comics', link: '/comics' },
+        { title: 'Случайные персонажи', view: 'top_random_characters', link: '/characters' },
+      ];
+      function buildHomeRows() {
+        const box = document.getElementById('homeRows');
+        if (!box) return;
+        box.innerHTML = '';
+        for (const r of HOME_VIEWS) {
+          const el = document.createElement('view-row');
+          el.setAttribute('title', r.title);
+          el.setAttribute('view', r.view);
+          el.setAttribute('link', linkToHub(r.link));
+          box.appendChild(el);
+        }
+      }
+
+      async function renderHub() {
+        const q = parseQuery();
+
+        if (q.url && !q.path) {
+          const p = pathOf(q.url);
+          const extras = { ...q };
+          delete extras.url;
+          const canon = hubUrl(p, extras);
+          if (location.search.includes('%2F') || location.search.includes('url=')) {
+            history.replaceState({}, '', canon);
+          }
+        }
+
+        const basePath = currentBasePath();
+        const title = 'Hub ' + (q.url || q.path || '/');
+        document.title = title;
+        hdr?.setAttribute('title', title);
+
+        const apiUrl =
+          '/api/list?' +
+          new URLSearchParams({
+            url: q.url || '',
+            path: q.path || '',
+            page: q.page || '0',
+            letter: q.letter || '',
+            ...Object.fromEntries(
+              Object.entries(q).filter(([k]) => !['url', 'path', 'page', 'letter'].includes(k)),
+            ),
+          }).toString();
+
+        const r = await fetch(apiUrl);
+        const j = await r.json();
+
+        const rawBtn = document.getElementById('rawBtn');
+        const siteBtn = document.getElementById('siteBtn');
+        const hubBar = document.getElementById('hubBar');
+
+        if (rawBtn) {
+          rawBtn.href = j?.links?.listSelf || apiUrl;
+          rawBtn.classList.remove('hidden');
+        }
+        if (siteBtn) {
+          const siteUrl = 'https://multporn.net' + basePath;
+          siteBtn.href = siteUrl;
+          siteBtn.classList.remove('hidden');
+        }
+        if (hubBar && (rawBtn || siteBtn)) hubBar.classList.remove('hidden');
+
+        const sf = document.getElementById('sortForm');
+        const sorting = j.sorting;
+        function selectHTML(sel) {
+          if (!sel) return '';
+          const opts = (sel.options || [])
+            .map(
+              (o) =>
+                `<option value="${String(o.value).replace(/"/g, '&quot;')}"${
+                  o.selected ? ' selected' : ''
+                }>${o.label || o.value}</option>`,
+            )
+            .join('');
+          return `<label class="lbl" for="sel-${sel.name}">${sel.label || sel.name}</label>
+                  <select id="sel-${sel.name}" name="${sel.name}" class="form-select">${opts}</select>`;
+        }
+        if (sf && sorting) {
+          sf.innerHTML =
+            [
+              selectHTML(sorting.sort_by),
+              selectHTML(sorting.sort_order),
+              ...(sorting.filters || []).map(selectHTML),
+            ].join('') + `<button class="btn" type="submit">Apply</button>`;
+          sf.classList.remove('hidden');
+          sf.onsubmit = (e) => {
+            e.preventDefault();
+            show();
+            const form = new FormData(sf);
+            const extra = Object.fromEntries(form.entries());
+            const href = hubUrl(basePath, { ...q, ...extra, page: 0, letter: q.letter || '' });
+            location.href = href;
+          };
+        } else if (sf) {
+          sf.classList.add('hidden');
+          sf.innerHTML = '';
+        }
+
+        const alpha = document.getElementById('alpha');
+        const letters = j.alphabet?.letters || [];
+        if (alpha && letters.length) {
+          alpha.innerHTML = letters
+            .map((l) => {
+              const lab = l.label || l.value || '';
+              const val = l.value || lab;
+              const targetPath = l.href ? pathOf(l.href) : basePath;
+              const href = hubUrl(targetPath, { ...q, letter: val, page: 0 });
+              return `<a class="a${l.active ? ' active' : ''}" href="${href}">${lab}</a>`;
+            })
+            .join('');
+          alpha.classList.remove('hidden');
+        } else if (alpha) {
+          alpha.classList.add('hidden');
+          alpha.innerHTML = '';
+        }
+
+        const grid = document.getElementById('hubGrid');
+        if (grid) {
+          grid.innerHTML = '';
+          const frag = document.createDocumentFragment();
+          (j.items || []).forEach((it) => {
+            const el = document.createElement('tile-card');
+            el.setAttribute('href', '/viewer.html?url=' + encodeURIComponent(it.url || ''));
+            if (it.proxiedThumb || it.thumb) el.setAttribute('thumb', it.proxiedThumb || it.thumb);
+            el.setAttribute('title', it.title || '');
+            el.setAttribute('enhance', 'auto');
+            frag.appendChild(el);
+          });
+          grid.appendChild(frag);
+        }
+
+        const pager = document.getElementById('pager');
+        if (pager) {
+          const page = Number(q.page || '0');
+          const totalPages =
+            typeof j.totalPages === 'number' && j.totalPages > 0 ? j.totalPages : 1;
+          const hasPrev = page > 0;
+          const hasNext = !!j.hasNext && page + 1 < totalPages;
+
+          if (totalPages > 1) {
+            const prevHref = hasPrev ? hubUrl(basePath, { ...q, page: page - 1 }) : '';
+            const nextHref = hasNext ? hubUrl(basePath, { ...q, page: page + 1 }) : '';
+            pager.innerHTML =
+              (hasPrev ? `<a class="btn navlink" href="${prevHref}">Prev</a>` : '') +
+              `<span class="muted">Page ${page + 1} of ${totalPages}</span>` +
+              (hasNext ? `<a class="btn navlink" href="${nextHref}">Next</a>` : '');
+            pager.classList.remove('hidden');
+          } else {
+            pager.classList.add('hidden');
+            pager.innerHTML = '';
+          }
+        }
+      }
+
+      function goViewer(e) {
+        e.preventDefault();
+        const v = document.getElementById('u')?.value;
+        if (!v) return;
+        location.href = '/viewer.html?url=' + encodeURIComponent(v);
+      }
+      function resolveJSON() {
+        const v = document.getElementById('u')?.value;
+        if (!v) return;
+        location.href = '/api/resolve?url=' + encodeURIComponent(v);
+      }
+      function goHub(e) {
+        e.preventDefault();
+        const v = document.getElementById('p')?.value || '';
+        if (!v) return;
+        location.href = '/hub?path=' + pathOf(v);
+      }
+
+      (async function boot() {
+        if (isHub) {
+          const q = parseQuery();
+          if (q.url && !q.path) {
+            const p = pathOf(q.url);
+            const extras = { ...q };
+            delete extras.url;
+            history.replaceState({}, '', hubUrl(p, extras));
+          }
+          document.getElementById('home')?.classList.add('hidden');
+          document.getElementById('hub')?.classList.remove('hidden');
+          try {
+            show();
+            await renderHub();
+          } finally {
+            hide();
+          }
+        } else {
+          document.getElementById('home')?.classList.remove('hidden');
+          document.getElementById('hub')?.classList.add('hidden');
+          buildHomeRows();
+        }
+      })();
+    </script>
+  </body>
+</html>

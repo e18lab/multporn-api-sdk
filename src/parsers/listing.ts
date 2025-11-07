@@ -30,6 +30,7 @@ function pickThumb($scope: cheerio.Cheerio<any>, baseURL: string): string | unde
     '.views-field-field-gif-preview img',
     '.views-field-field-gif-pre img',
     '.views-field-field-gif img',
+    '.views-field-field-files img',
     'img',
   ];
 
@@ -60,11 +61,13 @@ function findTitleLink($scope: cheerio.Cheerio<any>) {
     ? '.views-field-title a[href]'
     : $scope.find('.views-field-name a[href]').first().length
       ? '.views-field-name a[href]'
-      : $scope.find('strong a[href]').first().length
-        ? 'strong a[href]'
-        : $scope.find('h5 a[href]').first().length
-          ? 'h5 a[href]'
-          : 'a[href]';
+      : $scope.find('.views-field-nothing-1 h3 a[href]').first().length
+        ? '.views-field-nothing-1 h3 a[href]'
+        : $scope.find('strong a[href]').first().length
+          ? 'strong a[href]'
+          : $scope.find('h5 a[href]').first().length
+            ? 'h5 a[href]'
+            : 'a[href]';
   return $scope.find(sel).first();
 }
 
@@ -77,7 +80,7 @@ function isPager($a: cheerio.Cheerio<any>): boolean {
 }
 
 function cardRoot($a: cheerio.Cheerio<any>): cheerio.Cheerio<any> {
-  const r = $a.closest('li, .views-row, td, .node, .views-col, .view-content > div').first();
+  const r = $a.closest('li, .views-row, td, .node, .views-col, .view-content > div, tr').first();
   return r.length ? r : $a.parent();
 }
 
@@ -92,6 +95,33 @@ export function parseHubListing(html: string, baseURL: string, page: number): Pa
   for (const v of scopes) {
     const $view = $(v);
     const $root = $view.find('.view-content').length ? $view.find('.view-content') : $view;
+
+    $root.find('table.views-table tbody tr').each((_, tr) => {
+      const $tr = $(tr);
+
+      let a = $tr.find('.views-field-nothing-1 h3 a[href]').first();
+      if (!a.length) {
+        const cand = $tr.find('a[href]').first();
+        if (cand.length && !isPager(cand)) a = cand;
+      }
+      const href = a.attr('href') || '';
+      const url = toAbsolute(baseURL, href);
+      if (!url || seen.has(url)) return;
+
+      const title =
+        textFrom($tr.find('.views-field-nothing-1 h3').first()) ||
+        textFrom(a) ||
+        a.attr('title') ||
+        '';
+
+      if (!title.trim()) return;
+
+      const thumbCell = $tr.find('.views-field-field-files').first();
+      const thumb = pickThumb(thumbCell, baseURL) || pickThumb($tr, baseURL);
+
+      items.push({ title: title.trim(), url, thumb });
+      seen.add(url);
+    });
 
     $root.find('table.views-view-grid td').each((_, td) => {
       const $td = $(td);
@@ -146,8 +176,10 @@ export function parseHubListing(html: string, baseURL: string, page: number): Pa
       const title =
         textFrom($card.find('.views-field-title .field-content').first()) ||
         textFrom($card.find('.views-field-name .field-content').first()) ||
+        textFrom($card.find('.views-field-nothing-1 h3').first()) ||
         $a.attr('title') ||
-        ($(imgEl).attr('alt') || '');
+        $(imgEl).attr('alt') ||
+        '';
 
       if (!title.trim()) return;
 

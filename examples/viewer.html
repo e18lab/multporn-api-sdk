@@ -1,0 +1,788 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Viewer</title>
+    <script type="module" src="/components/app-header.js"></script>
+    <script type="module" src="/components/card.js"></script>
+    <script type="module" src="/components/carousel.js"></script>
+    <style>
+      :root {
+        --bg: #0e1117;
+        --fg: #e6edf3;
+        --muted: #8b949e;
+        --card: #161b22;
+        --accent: #58a6ff;
+        --accent-hover: #79b8ff;
+        --shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+        --border: rgba(255, 255, 255, 0.06);
+        --tag-bg: #21262d;
+        --tag-hover: #30363d;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font:
+          14px/1.45 system-ui,
+          -apple-system,
+          Segoe UI,
+          Roboto,
+          Ubuntu,
+          Cantarell,
+          Noto Sans,
+          Helvetica,
+          Arial;
+      }
+      body.no-scroll {
+        overflow: hidden;
+      }
+      a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      a:hover {
+        color: var(--accent-hover);
+        text-decoration: underline;
+      }
+
+      .loader {
+        position: fixed;
+        inset: 0 0 auto 0;
+        height: 3px;
+        background: linear-gradient(90deg, var(--accent), #8b949e);
+        transform: scaleX(0);
+        transform-origin: left;
+        transition: transform 0.25s ease;
+        z-index: 9999;
+      }
+      .load-on .loader {
+        transform: scaleX(1);
+      }
+
+      .wrap {
+        max-width: 1200px;
+        margin: 0px auto 16px auto;
+        padding: 0 16px;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        box-shadow: var(--shadow);
+        padding: 16px;
+        margin-bottom: 16px;
+      }
+      .cardPlayer {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        box-shadow: var(--shadow);
+        margin: 16px 0;
+      }
+      .cardGalary {
+        margin: 16px 0;
+      }
+      .muted {
+        color: var(--muted);
+      }
+
+      .player-embed {
+        aspect-ratio: 16/9;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        overflow: hidden;
+        background: #000;
+      }
+      .player-embed iframe {
+        width: 100%;
+        height: 100%;
+        border: 0;
+        display: block;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        gap: 12px;
+      }
+
+      .section-title {
+        font-size: 16px;
+        font-weight: 500;
+        margin: 5px 0px;
+        color: var(--fg);
+      }
+      .meta-header {
+        margin-bottom: 16px;
+      }
+      .meta-header h2 {
+        margin: 0 0 8px;
+        font-size: 24px;
+        font-weight: 600;
+      }
+      .meta-info {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 14px;
+        align-items: center;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .meta-info span {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 2px 0;
+      }
+      .meta-info svg {
+        width: 16px;
+        height: 16px;
+        fill: var(--muted);
+      }
+      .breadcrumbs {
+        margin: 16px 0;
+        font-size: 13px;
+        color: var(--muted);
+      }
+      .breadcrumbs a {
+        color: var(--muted);
+      }
+      .breadcrumbs a:hover {
+        color: var(--accent);
+      }
+      .breadcrumbs span {
+        margin: 0 4px;
+      }
+      .tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 12px;
+      }
+      .tag,
+      .tag-span {
+        padding: 4px 10px;
+        background: var(--tag-bg);
+        border-radius: 20px;
+        font-size: 12px;
+        border: 1px solid var(--border);
+        transition: background 0.2s;
+        display: inline-flex;
+        align-items: center;
+      }
+      .tag:hover {
+        background: var(--tag-hover);
+      }
+
+      .uploader {
+        display: grid;
+        grid-template-columns: 48px 1fr;
+        gap: 10px;
+        align-items: center;
+        margin-top: 8px;
+      }
+      .uploader img {
+        width: 48px;
+        height: 48px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        object-fit: cover;
+        background: #0b0e14;
+      }
+      .uploader .name {
+        font-weight: 600;
+      }
+      .uploader .date {
+        color: var(--muted);
+        font-size: 12px;
+        margin-top: 2px;
+      }
+
+      .lightbox {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.94);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 99999;
+      }
+      .lightbox.open {
+        display: flex;
+      }
+      .lightbox img {
+        max-width: 96vw;
+        max-height: 92vh;
+        object-fit: contain;
+        border-radius: 8px;
+        box-shadow: var(--shadow);
+        user-select: none;
+        -webkit-user-drag: none;
+      }
+      .lb-x {
+        position: fixed;
+        top: 16px;
+        right: 16px;
+        width: 36px;
+        height: 36px;
+        display: grid;
+        place-items: center;
+        color: #fff;
+        background: rgba(0, 0, 0, 0.45);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 10px;
+        cursor: pointer;
+        font-size: 20px;
+        z-index: 2222;
+      }
+      .lb-x:hover {
+        background: rgba(0, 0, 0, 0.6);
+      }
+      .lb-counter {
+        position: fixed;
+        bottom: 16px;
+        left: 50%;
+        transform: translateX(-50%);
+        color: #fff;
+        font-size: 12px;
+        background: rgba(0, 0, 0, 0.35);
+        padding: 6px 10px;
+        border-radius: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+      }
+      .lb-hit {
+        position: fixed;
+        top: 0;
+        bottom: 0;
+        width: 40vw;
+        z-index: 1;
+      }
+      .lb-left {
+        left: 0;
+      }
+      .lb-right {
+        right: 0;
+      }
+      @media (max-width: 640px) {
+        .lb-hit {
+          width: 48vw;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="loader" id="loader"></div>
+    <app-header title="Viewer"></app-header>
+
+    <div class="wrap">
+      <div id="metaCard" class="card" style="display: none">
+        <div class="meta-header">
+          <h2 id="metaTitle"></h2>
+          <div class="meta-info">
+            <span id="views" style="display: none">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5C21.27 7.61 17 4.5 12 4.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"
+                />
+              </svg>
+              <span id="viewsCount"></span> views
+            </span>
+
+            <span id="rating" style="display: none">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"
+                />
+              </svg>
+              <span id="ratingValue"></span>
+              <span id="votesValue" class="muted"></span>
+            </span>
+
+            <span id="authors" style="display: none">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zM12 14c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"
+                />
+              </svg>
+              Authors: <span id="authorsList"></span>
+            </span>
+          </div>
+        </div>
+
+        <div id="uploader" class="uploader" style="display: none">
+          <img id="uploaderAvatar" alt="avatar" />
+          <div>
+            <div class="name" id="uploaderName"></div>
+            <div class="date" id="uploaderDate"></div>
+          </div>
+        </div>
+
+        <div id="breadcrumbs" class="breadcrumbs" style="display: none"></div>
+
+        <image-carousel id="carousel" preload="3" start="0" style="display: none"></image-carousel>
+
+        <div id="gridCard" class="cardGalary" style="display: none">
+          <div class="grid" id="grid"></div>
+        </div>
+
+        <div id="playerCard" class="cardPlayer" style="display: none">
+          <div class="player-embed">
+            <iframe
+              id="player"
+              allow="autoplay; encrypted-media; picture-in-picture"
+              allowfullscreen
+            ></iframe>
+          </div>
+          <div class="muted" style="display: none">
+            Open player: <a class="btn" id="openPlayer" target="_blank" href="#">player.html</a>
+          </div>
+        </div>
+
+        <div id="sections" style="display: none">
+          <div class="section-title">Sections</div>
+          <div class="tags" id="sectionsList"></div>
+        </div>
+        <div id="tags" style="display: none">
+          <div class="section-title">Tags</div>
+          <div class="tags" id="tagsList"></div>
+        </div>
+        <div id="userTags" style="display: none">
+          <div class="section-title">User Tags</div>
+          <div class="tags" id="userTagsList"></div>
+        </div>
+      </div>
+
+      <div id="recsCard" class="card" style="display: none">
+        <div class="section-title">Recommendations</div>
+        <tile-grid id="recs"></tile-grid>
+      </div>
+    </div>
+
+    <div class="lightbox" id="lightbox" aria-hidden="true">
+      <div class="lb-hit lb-left" id="lbLeft" aria-hidden="true"></div>
+      <img id="lbImg" alt="current" />
+      <div class="lb-hit lb-right" id="lbRight" aria-hidden="true"></div>
+      <button class="lb-x" id="lbClose" aria-label="Close">✕</button>
+      <div class="lb-counter" id="lbCounter"></div>
+    </div>
+
+    <script>
+      (function () {
+        const headerEl = document.querySelector('app-header');
+        const qs = (k) => new URLSearchParams(location.search).get(k);
+        const urlParam = qs('url');
+        const pathParam = qs('path');
+        function show() {
+          document.body.classList.add('load-on');
+        }
+        function hide() {
+          document.body.classList.remove('load-on');
+        }
+        window.addEventListener('pageshow', hide);
+        window.addEventListener('app-nav-start', show);
+        document.addEventListener('click', (e) => {
+          const a = e.target.closest("a.navlink,.btn[href*='viewer'],.breadcrumbs a,.tags a");
+          if (a) show();
+        });
+
+        const targetIsPath = !!pathParam;
+        const target = targetIsPath ? pathParam : urlParam || '';
+        if (!target) {
+          document.title = 'Missing ?path or ?url';
+          headerEl?.setAttribute('title', 'Missing ?path or ?url');
+          return;
+        }
+
+        const metaCard = document.getElementById('metaCard');
+        const metaTitle = document.getElementById('metaTitle');
+        const viewsWrap = document.getElementById('views');
+        const viewsCount = document.getElementById('viewsCount');
+        const ratingWrap = document.getElementById('rating');
+        const ratingValue = document.getElementById('ratingValue');
+        const votesValue = document.getElementById('votesValue');
+        const authors = document.getElementById('authors');
+        const authorsList = document.getElementById('authorsList');
+        const breadcrumbsEl = document.getElementById('breadcrumbs');
+        const sections = document.getElementById('sections');
+        const sectionsList = document.getElementById('sectionsList');
+        const tags = document.getElementById('tags');
+        const tagsList = document.getElementById('tagsList');
+        const userTags = document.getElementById('userTags');
+        const userTagsList = document.getElementById('userTagsList');
+        const playerCard = document.getElementById('playerCard');
+        const playerIframe = document.getElementById('player');
+        const openPlayer = document.getElementById('openPlayer');
+        const gridCard = document.getElementById('gridCard');
+        const grid = document.getElementById('grid');
+        const recsCard = document.getElementById('recsCard');
+        const recs = document.getElementById('recs');
+        const carouselEl = document.getElementById('carousel');
+
+        const uploaderWrap = document.getElementById('uploader');
+        const uploaderAvatar = document.getElementById('uploaderAvatar');
+        const uploaderName = document.getElementById('uploaderName');
+        const uploaderDate = document.getElementById('uploaderDate');
+
+        const Cache = window.MPImageCache || { get: (u) => Promise.resolve(u), prime: (_u) => {} };
+
+        const lb = document.getElementById('lightbox');
+        const lbImg = document.getElementById('lbImg');
+        const lbLeft = document.getElementById('lbLeft');
+        const lbRight = document.getElementById('lbRight');
+        const lbClose = document.getElementById('lbClose');
+        const lbCounter = document.getElementById('lbCounter');
+
+        let lbItems = [];
+        let lbIndex = 0;
+        let lbToken = 0;
+
+        async function updateLB() {
+          const token = ++lbToken;
+          const total = lbItems.length;
+          if (!total) return;
+          lbIndex = Math.max(0, Math.min(total - 1, lbIndex));
+          const src = lbItems[lbIndex].src;
+          try {
+            const blobUrl = await Cache.get(src);
+            if (lbToken === token) lbImg.src = blobUrl;
+          } catch {
+            if (lbToken === token) lbImg.src = src;
+          }
+          lbCounter.textContent = `${lbIndex + 1} / ${total}`;
+          if (carouselEl && typeof carouselEl.go === 'function') carouselEl.go(lbIndex);
+          if (lbIndex + 1 < total) Cache.prime(lbItems[lbIndex + 1].src);
+          if (lbIndex - 1 >= 0) Cache.prime(lbItems[lbIndex - 1].src);
+        }
+        function openLB(items, index = 0) {
+          if (!Array.isArray(items) || !items.length) return;
+          lbItems = items;
+          lbIndex = index | 0;
+          updateLB();
+          lb.classList.add('open');
+          lb.setAttribute('aria-hidden', 'false');
+          document.body.classList.add('no-scroll');
+          window.addEventListener('keydown', onLBKey);
+        }
+        function closeLB() {
+          lb.classList.remove('open');
+          lb.setAttribute('aria-hidden', 'true');
+          document.body.classList.remove('no-scroll');
+          window.removeEventListener('keydown', onLBKey);
+        }
+        function nextLB() {
+          if (lbIndex < lbItems.length - 1) {
+            lbIndex++;
+            updateLB();
+          }
+        }
+        function prevLB() {
+          if (lbIndex > 0) {
+            lbIndex--;
+            updateLB();
+          }
+        }
+        function onLBKey(e) {
+          if (e.key === 'ArrowRight') {
+            nextLB();
+            e.preventDefault();
+          } else if (e.key === 'ArrowLeft') {
+            prevLB();
+            e.preventDefault();
+          } else if (e.key === 'Escape') {
+            closeLB();
+            e.preventDefault();
+          }
+        }
+        lbLeft.addEventListener('click', prevLB);
+        lbRight.addEventListener('click', nextLB);
+        lbClose.addEventListener('click', closeLB);
+        let fx = null;
+        lb.addEventListener(
+          'touchstart',
+          (e) => {
+            fx = e.touches?.[0]?.clientX ?? null;
+          },
+          { passive: true },
+        );
+        lb.addEventListener(
+          'touchend',
+          (e) => {
+            if (fx == null) return;
+            const dx = (e.changedTouches?.[0]?.clientX ?? fx) - fx;
+            if (Math.abs(dx) > 50) dx < 0 ? nextLB() : prevLB();
+            fx = null;
+          },
+          { passive: true },
+        );
+
+        document.addEventListener('request-fullscreen', (e) => {
+          const d = e.detail || {};
+          const items =
+            Array.isArray(d.items) && d.items.length
+              ? d.items
+              : typeof carouselEl.getItems === 'function'
+                ? carouselEl.getItems()
+                : [];
+          const idx = Number.isFinite(d.index) ? d.index : 0;
+          openLB(items, idx);
+        });
+
+        function safePath(u) {
+          try {
+            if (!u) return '';
+            return new URL(u, 'https://multporn.net').pathname || '';
+          } catch {
+            return '';
+          }
+        }
+        function esc(txt) {
+          return String(txt).replace(/</g, '&lt;');
+        }
+
+        show();
+        const apiUrl = targetIsPath
+          ? '/api/resolve?path=' + encodeURIComponent(target)
+          : '/api/resolve?url=' + encodeURIComponent(target);
+
+        fetch(apiUrl)
+          .then((r) => r.json())
+          .then((data) => {
+            hide();
+            if (data?.route === 'listing') {
+              const path =
+                data?.data?.path ||
+                (() => {
+                  try {
+                    return new URL(target, location.origin).pathname;
+                  } catch {
+                    return '/';
+                  }
+                })();
+              location.replace('/hub?path=' + path);
+              return;
+            }
+
+            const absUrl =
+              data?.data?.absoluteUrl || (targetIsPath ? 'https://multporn.net' + target : target);
+            const viewer = data?.data?.viewer || {};
+            const meta = viewer.meta || {};
+            const metaTitleText = meta.title || absUrl || 'Viewer';
+            document.title = metaTitleText;
+            headerEl?.setAttribute('title', metaTitleText);
+
+            if (metaTitle) metaTitle.textContent = metaTitleText;
+
+            if (typeof meta.views === 'number' && viewsCount) {
+              viewsCount.textContent = meta.views.toLocaleString();
+              viewsWrap.style.display = '';
+            }
+
+            if ((typeof meta.rating === 'number' || typeof meta.votes === 'number') && ratingWrap) {
+              if (typeof meta.rating === 'number') {
+                ratingValue.textContent = meta.rating.toFixed(1);
+              } else {
+                ratingValue.textContent = '';
+              }
+              if (typeof meta.votes === 'number') {
+                votesValue.textContent = `(${meta.votes})`;
+              } else {
+                votesValue.textContent = '';
+              }
+              ratingWrap.style.display = '';
+            }
+
+            if (Array.isArray(meta.authors) && meta.authors.length && authorsList && authors) {
+              authorsList.innerHTML = meta.authors
+                .map((a) => {
+                  const title = esc(a.title || '');
+                  const path = safePath(a.url || '');
+                  if (path) {
+                    return `<a href="/viewer?path=${path}">${title}</a>`;
+                  }
+                  return `<span class="muted">${title}</span>`;
+                })
+                .join(', ');
+              authors.style.display = '';
+            }
+
+            const u = meta.uploader || {};
+            if (u && (u.name || u.avatar || u.url || u.dateText)) {
+              if (u.avatar && uploaderAvatar) uploaderAvatar.src = '/img?url=' + u.avatar;
+              else
+                uploaderAvatar.src =
+                  'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
+              if (u.name) {
+                const nameHtml = u.url
+                  ? `<a href="/viewer?path=${safePath(u.url)}">${esc(u.name)}</a>`
+                  : esc(u.name);
+                uploaderName.innerHTML = nameHtml;
+              } else {
+                uploaderName.textContent = '';
+              }
+              uploaderDate.textContent = u.dateText || '';
+              uploaderWrap.style.display = '';
+            }
+
+            if (Array.isArray(meta.breadcrumbs) && meta.breadcrumbs.length && breadcrumbsEl) {
+              breadcrumbsEl.innerHTML = meta.breadcrumbs
+                .map((b, i) => {
+                  const path = safePath(b.url || '');
+                  const title = esc(b.title || '');
+                  return (
+                    (i > 0 ? '<span>›</span>' : '') +
+                    (path ? `<a href="/viewer?path=${path}">${title}</a>` : `<span>${title}</span>`)
+                  );
+                })
+                .join('');
+              breadcrumbsEl.style.display = '';
+            }
+
+            if (Array.isArray(meta.sections) && meta.sections.length && sectionsList && sections) {
+              sectionsList.innerHTML = meta.sections
+                .map((s) => {
+                  const path = safePath(s.url || '');
+                  const title = esc(s.title || '');
+                  return path
+                    ? `<a class="tag" href="/viewer?path=${path}">${title}</a>`
+                    : `<span class="tag-span">${title}</span>`;
+                })
+                .join('');
+              sections.style.display = '';
+            }
+
+            if (Array.isArray(meta.tags) && meta.tags.length && tagsList && tags) {
+              tagsList.innerHTML = meta.tags
+                .map((t) => {
+                  const path = safePath(t.url || '');
+                  const title = esc(t.title || '');
+                  return path
+                    ? `<a class="tag" href="/viewer?path=${path}">${title}</a>`
+                    : `<span class="tag-span">${title}</span>`;
+                })
+                .join('');
+              tags.style.display = '';
+            }
+
+            if (Array.isArray(meta.userTags) && meta.userTags.length && userTagsList && userTags) {
+              userTagsList.innerHTML = meta.userTags
+                .map((ut) => {
+                  const path = safePath(ut.url || '');
+                  const title = esc(ut.title || '');
+                  return path
+                    ? `<a class="tag" href="/viewer?path=${path}">${title}</a>`
+                    : `<span class="tag-span">${title}</span>`;
+                })
+                .join('');
+              userTags.style.display = '';
+            }
+
+            if (
+              meta.views != null ||
+              meta.rating != null ||
+              meta.votes != null ||
+              meta.authors?.length ||
+              meta.breadcrumbs?.length ||
+              meta.sections?.length ||
+              meta.tags?.length ||
+              meta.userTags?.length ||
+              meta.uploader
+            ) {
+              metaCard.style.display = '';
+            }
+
+            if (
+              viewer.kind === 'video' &&
+              Array.isArray(viewer.video?.sources) &&
+              viewer.video.sources.length
+            ) {
+              const poster = viewer.video.poster ? String(viewer.video.poster) : '';
+              const sourcesParam = viewer.video.sources
+                .map((s) => {
+                  const label = s?.label || s?.type || 'source';
+                  const src = s?.proxied || s?.url || '';
+                  if (!src) return '';
+                  return encodeURIComponent(label) + ',' + encodeURIComponent(src);
+                })
+                .filter(Boolean)
+                .join('|');
+              const qsp = [
+                'title=' + encodeURIComponent(metaTitleText),
+                poster ? 'poster=' + encodeURIComponent(poster) : '',
+                'sources=' + sourcesParam,
+              ]
+                .filter(Boolean)
+                .join('&');
+              const purl = '/player.html?' + qsp;
+              playerIframe.src = purl;
+              openPlayer.href = purl;
+              playerCard.style.display = '';
+              carouselEl.style.display = 'none';
+            }
+
+            if (viewer.kind === 'images' && Array.isArray(viewer.images)) {
+              const items = viewer.images
+                .map((im) => {
+                  const src =
+                    im.proxied ||
+                    im.original ||
+                    im.large ||
+                    im.medium ||
+                    im.small ||
+                    im.thumb ||
+                    '';
+                  const thumb = im.thumb || im.small || im.medium || im.original || src || '';
+                  const proxiedSrc = src.startsWith('http')
+                    ? '/img?url=' + encodeURIComponent(src)
+                    : src;
+                  const proxiedThumb = thumb.startsWith('http')
+                    ? '/img?url=' + encodeURIComponent(thumb)
+                    : thumb;
+                  return { src: proxiedSrc, thumb: proxiedThumb };
+                })
+                .filter((it) => it.src);
+
+              if (items.length) {
+                const Cache = window.MPImageCache || { prime: () => {} };
+                for (let i = 0; i < Math.min(4, items.length); i++) Cache.prime(items[i].src);
+
+                carouselEl.setItems(items, 0);
+                carouselEl.style.display = '';
+                gridCard.style.display = 'none';
+                playerCard.style.display = 'none';
+              }
+            }
+
+            const recommendations = Array.isArray(data?.data?.recommendations)
+              ? data.data.recommendations
+              : [];
+            if (recommendations.length) {
+              recs.innerHTML = '';
+              const frag = document.createDocumentFragment();
+              for (const r of recommendations) {
+                const el = document.createElement('tile-card');
+                const t = r?.title || '';
+                const u = r?.url || '';
+                const th = r?.proxiedThumb || r?.thumb || '';
+                const p = safePath(u);
+                el.setAttribute('href', p ? '/viewer?path=' + p : '#');
+                if (th) el.setAttribute('thumb', String(th));
+                el.setAttribute('title', String(t));
+                el.setAttribute('enhance', 'auto');
+                frag.appendChild(el);
+              }
+              recs.appendChild(frag);
+              recsCard.style.display = '';
+            }
+          })
+          .catch((err) => {
+            hide();
+            document.title = 'Error';
+            headerEl?.setAttribute('title', 'Error');
+            console.error(err);
+          });
+      })();
+    </script>
+  </body>
+</html>
