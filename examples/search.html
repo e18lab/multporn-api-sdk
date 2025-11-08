@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Search</title>
+    <script type="module" src="/components/app-header.js"></script>
+    <script type="module" src="/components/card.js"></script>
+    <style>
+      :root {
+        --bg: #0e1117;
+        --fg: #e6edf3;
+        --muted: #8b949e;
+        --card: #161b22;
+        --accent: #58a6ff;
+        --border: rgba(255, 255, 255, 0.08);
+        --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+        --tag-bg: #21262d;
+        --tag-hover: #30363d;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font:
+          14px/1.45 system-ui,
+          -apple-system,
+          Segoe UI,
+          Roboto,
+          Ubuntu,
+          Cantarell,
+          Noto Sans,
+          Helvetica,
+          Arial;
+      }
+      .loader {
+        position: fixed;
+        inset: 0 0 auto 0;
+        height: 3px;
+        background: linear-gradient(90deg, var(--accent), #8b949e);
+        transform: scaleX(0);
+        transform-origin: left;
+        transition: transform 0.25s ease;
+        z-index: 9999;
+      }
+      .load-on .loader {
+        transform: scaleX(1);
+      }
+      .wrap {
+        max-width: 1200px;
+        margin: 16px auto;
+        padding: 0 16px;
+      }
+      .searchbar {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 8px;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 10px;
+        box-shadow: var(--shadow);
+        position: sticky;
+        top: calc(56px + 8px);
+        z-index: 5;
+      }
+      @media (max-width: 1100px) {
+        .searchbar {
+          top: calc(52px + 8px);
+        }
+      }
+      .searchbar input[type='search'] {
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: #0f1622;
+        color: var(--fg);
+        font: inherit;
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: var(--tag-bg);
+        color: var(--fg);
+        cursor: pointer;
+      }
+      .btn:hover {
+        background: var(--tag-hover);
+      }
+      .section {
+        margin: 16px 0;
+      }
+      .section-title {
+        font-size: 16px;
+        font-weight: 600;
+        margin: 0 0 10px 4px;
+        color: var(--fg);
+      }
+      tile-grid {
+        display: block;
+      }
+      .pager {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        justify-content: center;
+        margin: 18px 0;
+        color: var(--muted);
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .empty {
+        margin: 20px 0;
+        padding: 14px;
+        border: 1px dashed var(--border);
+        border-radius: 12px;
+        color: var(--muted);
+        background: rgba(255, 255, 255, 0.02);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="loader" id="loader"></div>
+    <app-header title="Search"></app-header>
+
+    <div class="wrap">
+      <form id="form" class="searchbar" role="search">
+        <input id="q" type="search" name="q" placeholder="Search on the site..." />
+        <button class="btn" type="submit">Search</button>
+      </form>
+
+      <div id="results"></div>
+
+      <div id="pager" class="pager" style="display: none"></div>
+    </div>
+
+    <script type="module">
+      function show() {
+        document.body.classList.add('load-on');
+      }
+      function hide() {
+        document.body.classList.remove('load-on');
+      }
+      window.addEventListener('pageshow', hide);
+      window.addEventListener('app-nav-start', show);
+      document.addEventListener('click', (e) => {
+        const a = e.target.closest('a');
+        if (a && a.origin === location.origin) show();
+      });
+
+      const form = document.getElementById('form');
+      const input = document.getElementById('q');
+      const results = document.getElementById('results');
+      const pager = document.getElementById('pager');
+
+      const PLACEHOLDER = (() => {
+        const svg =
+          "<svg xmlns='http://www.w3.org/2000/svg' width='560' height='800' viewBox='0 0 560 800'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='#1b2230'/><stop offset='1' stop-color='#2a3550'/></linearGradient></defs><rect width='100%' height='100%' fill='url(#g)'/><g fill='#8b949e' font-family='system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif' font-size='28' text-anchor='middle'><text x='50%' y='50%'>No image</text></g></svg>";
+        return 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg);
+      })();
+
+      function esc(s = '') {
+        return String(s).replace(
+          /[&<>"']/g,
+          (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[m],
+        );
+      }
+      function getQ() {
+        return new URLSearchParams(location.search).get('q') || '';
+      }
+      function getPage() {
+        return +(new URLSearchParams(location.search).get('page') || '0') | 0;
+      }
+      function setQ(q) {
+        input.value = q;
+        document.title = q ? `Search: ${q}` : 'Search';
+      }
+      function badgeFromUrl(u) {
+        try {
+          const p = new URL(u, location.origin).pathname.replace(/^\/+/, '');
+          const seg = (p.split('/')[0] || '').toLowerCase();
+          switch (seg) {
+            case 'comics':
+              return 'Comics';
+            case 'hentai_manga':
+            case 'manga':
+              return 'Manga';
+            case 'pictures':
+            case 'pipictures':
+              return 'Pictures';
+            case 'video':
+              return 'Video';
+            case 'games':
+              return 'Games';
+            case 'gay_porn_comics':
+              return 'Gay porn comics';
+            default:
+              return seg
+                ? seg.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+                : 'Other';
+          }
+        } catch {
+          return 'Other';
+        }
+      }
+      function groupKey(it) {
+        return badgeFromUrl(it.url || it.href || '');
+      }
+
+      function render(items, query) {
+        results.innerHTML = '';
+        if (!items.length) {
+          results.innerHTML = `<div class="empty">Ничего не найдено по запросу «${esc(query)}».</div>`;
+          return;
+        }
+        const groups = new Map();
+        for (const it of items) {
+          const key = groupKey(it);
+          if (!groups.has(key)) groups.set(key, []);
+          groups.get(key).push(it);
+        }
+        const frag = document.createDocumentFragment();
+        for (const [title, arr] of groups.entries()) {
+          const sec = document.createElement('div');
+          sec.className = 'section';
+          sec.innerHTML = `<div class="section-title">${esc(title)}</div><tile-grid></tile-grid>`;
+          const grid = sec.querySelector('tile-grid');
+          const gf = document.createDocumentFragment();
+          for (const it of arr) {
+            const el = document.createElement('tile-card');
+            const badge = title ? `[${title}] ` : '';
+            el.setAttribute('href', '/viewer.html?url=' + encodeURIComponent(it.url || ''));
+            const thumb = it.thumb ? '/img?url=' + it.thumb : PLACEHOLDER;
+            el.setAttribute('thumb', thumb);
+            el.setAttribute('title', badge + (it.title || ''));
+            el.setAttribute('enhance', 'auto');
+            gf.appendChild(el);
+          }
+          grid.appendChild(gf);
+          frag.appendChild(sec);
+        }
+        results.appendChild(frag);
+      }
+
+      async function run() {
+        const q = getQ();
+        const page = getPage();
+        setQ(q);
+        if (!q) {
+          results.innerHTML = `<div class="empty">Enter a query to search the site.</div>`;
+          pager.style.display = 'none';
+          return;
+        }
+        show();
+        try {
+          const api = '/api/search?' + new URLSearchParams({ q, page }).toString();
+          const r = await fetch(api);
+          const j = await r.json();
+          render(j.items || [], q);
+          const totalPages =
+            typeof j.totalPages === 'number' && j.totalPages > 1 ? j.totalPages : 0;
+          if (totalPages > 1) {
+            const hasNext = !!j.hasNext && page + 1 < totalPages;
+            const hasPrev = page > 0;
+            const mkHref = (p) => '/search?' + new URLSearchParams({ q, page: p }).toString();
+            pager.innerHTML =
+              (hasPrev ? `<a class="btn" href="${mkHref(page - 1)}">← Back</a>` : '') +
+              `<span>Стр. ${page + 1} из ${totalPages}</span>` +
+              (hasNext ? `<a class="btn" href="${mkHref(page + 1)}">Forward →</a>` : '');
+            pager.style.display = '';
+          } else {
+            pager.style.display = 'none';
+          }
+        } catch (e) {
+          results.innerHTML = `<div class="empty">Download error: ${esc(String(e))}</div>`;
+          pager.style.display = 'none';
+        } finally {
+          hide();
+        }
+      }
+
+      form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const q = input.value.trim();
+        const sp = new URLSearchParams({ q });
+        history.pushState({}, '', '/search?' + sp.toString());
+        run();
+      });
+
+      window.addEventListener('popstate', run);
+      run();
+    </script>
+  </body>
+</html>

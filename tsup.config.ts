@@ -2,11 +2,13 @@ import { defineConfig } from 'tsup';
 
 export default defineConfig({
   entry: ['src/index.ts'],
-  format: ['esm', 'cjs'],
   dts: true,
+  format: ['esm', 'cjs'],
   sourcemap: true,
   clean: true,
-  minify: false,
   target: 'es2022',
-  skipNodeModulesBundle: true,
+  outDir: 'dist',
+  esbuildOptions(o) {
+    o.banner = o.banner || {};
+  },
 });

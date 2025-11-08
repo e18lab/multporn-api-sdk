@@ -7,8 +7,9 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import * as cheerio from 'cheerio';
+import { existsSync } from 'node:fs';
 
 const pipe = promisify(pipeline);
 
@@ -27,6 +28,7 @@ app.use(express.json({ limit: '1mb' }));
 app.use(compression({ filter: (req) => req.path !== '/vid' }));
 app.use(morgan('dev'));
 
+app.use(express.static(join(__dirname, 'public')));
 app.use(express.static(__dirname));
 
 async function tryImport(rel) {
@@ -295,20 +297,32 @@ app.get(
   }),
 );
 
-app.get(
-  '/api/search',
-  asyncRoute(async (req, res) => {
-    if (!sdkClient) throw new Error('SDK not loaded');
-    const q = String(req.query.q ?? '');
-    const page = Number(req.query.page ?? '0');
-    const raw = await sdkClient.search(q, page);
-    const data = withProxiedThumbs(raw);
-    const examplePreview = data.items?.[0]?.url
-      ? '/viewer.html?url=' + encodeURIComponent(data.items[0].url)
-      : undefined;
-    res.json({ ...data, links: { examplePreview } });
-  }),
-);
+app.get('/api/search', async (req, res) => {
+  if (!sdkClient) throw new Error('SDK not loaded');
+  try {
+    const q = String(req.query.q || req.query.query || '').trim();
+    const page = Math.max(0, parseInt(String(req.query.page ?? '0'), 10) || 0);
+    if (!q)
+      return res.json({
+        route: 'search',
+        query: '',
+        page: 0,
+        hasNext: false,
+        totalPages: 0,
+        items: [],
+      });
+
+    const data = await sdkClient.search(q, page);
+    return res.json({
+      ...data,
+      query: q,
+      route: 'search',
+      links: { listSelf: req.originalUrl },
+    });
+  } catch (e) {
+    res.status(500).json({ error: 'search_failed', detail: String(e?.message || e) });
+  }
+});
 
 app.get(
   '/api/post',
@@ -330,6 +344,13 @@ app.get(
     res.json(data);
   }),
 );
+
+app.get('/search', (req, res) => {
+  const filePrimary = join(__dirname, 'search.html');
+  const fileInPublic = join(__dirname, 'public', 'search.html');
+  const file = existsSync(filePrimary) ? filePrimary : fileInPublic;
+  res.sendFile(file);
+});
 
 app.get('/hub', (req, res) => {
   const url = req.query.url;
@@ -491,56 +512,463 @@ app.get(
 );
 
 app.get('/openapi.json', (req, res) => {
-  const servers = [{ url: getSelfBase(req) }];
+  const servers = [{ url: getSelfBase(req), description: 'Current server' }];
+
   const openapi = {
     openapi: '3.0.3',
     info: {
       title: 'Multporn API Dev Server',
-      version: '1.11.0',
+      version: '1.12.0',
       description:
-        'Dev server over SDK. Sorting/filters autodetected from Drupal Views exposed forms. Player on /viewer.html (iframe /player.html). /hub uses resolveSmart; pages fetched explicitly with page & exposed params.',
+        'Dev server over multporn-api-sdk. Sorting/filters autodetected from Drupal Views exposed forms. /hub uses resolveSmart; listing pages accept page & exposed params. Includes HTML pages for quick manual checks.',
+      contact: { name: 'e18lab', url: 'https://github.com/e18lab/multporn-api-sdk' },
+    },
+    externalDocs: {
+      description: 'SDK repository',
+      url: 'https://github.com/e18lab/multporn-api-sdk',
     },
     servers,
+    tags: [
+      { name: 'Resolve', description: 'Маршрутизация и определение типа страницы' },
+      { name: 'Listings', description: 'Списки, хабы и алфавитные выборки' },
+      { name: 'Search', description: 'Поиск по сайту' },
+      { name: 'Posts', description: 'Подробности поста/страницы' },
+      { name: 'Updates', description: 'Витрины (Drupal Views) — ленты обновлений' },
+      { name: 'Utils', description: 'Прокси для изображений/видео, RAW-фетч' },
+      { name: 'HTML', description: 'Готовые HTML страницы для ручной проверки' },
+    ],
+    components: {
+      parameters: {
+        UrlParam: {
+          name: 'url',
+          in: 'query',
+          schema: { type: 'string', format: 'uri' },
+          description: 'Абсолютная ссылка на страницу multporn.net. Взаимоисключимо с "path".',
+        },
+        PathParam: {
+          name: 'path',
+          in: 'query',
+          schema: { type: 'string', example: '/comics/adventure_time_porn' },
+          description: 'Путь внутри multporn.net (начинается с /). Взаимоисключимо с "url".',
+        },
+        PageParam: {
+          name: 'page',
+          in: 'query',
+          schema: { type: 'integer', minimum: 0, default: 0 },
+          description: 'Номер страницы (0-индексация).',
+        },
+        LetterParam: {
+          name: 'letter',
+          in: 'query',
+          schema: { type: 'string' },
+          description: 'Алфавитная буква/группа для листингов, где это поддерживается.',
+        },
+        QParam: {
+          name: 'q',
+          in: 'query',
+          schema: { type: 'string' },
+          description: 'Строка поиска.',
+        },
+        SlugOrUrl: {
+          name: 'url',
+          in: 'query',
+          schema: { type: 'string' },
+          required: false,
+          description: 'Ссылка или слаг поста. Можно также передать ?slug=...',
+        },
+        SlugParam: {
+          name: 'slug',
+          in: 'query',
+          schema: { type: 'string' },
+          required: false,
+          description: 'Слаг поста (альтернатива ?url=...).',
+        },
+        MediaUrlParam: {
+          name: 'url',
+          in: 'query',
+          required: true,
+          schema: { type: 'string', format: 'uri' },
+          description: 'Источник изображения/видео. Может быть вложенным (url/file/src).',
+        },
+      },
+      schemas: {
+        ListingItem: {
+          type: 'object',
+          required: ['title', 'url'],
+          properties: {
+            title: { type: 'string' },
+            url: { type: 'string', format: 'uri' },
+            thumb: { type: 'string', format: 'uri', nullable: true },
+            proxiedThumb: { type: 'string', format: 'uri', nullable: true },
+          },
+          example: {
+            title: 'Genshin Impact - Others',
+            url: 'https://multporn.net/pictures/genshin_impact_others_album',
+            thumb:
+              'https://multporn.net/sites/default/files/styles/search_image/public/pic_preview/genshin_impact_-_others_21216.jpg',
+            proxiedThumb: '/img?url=https%3A%2F%2Fmultporn.net%2Fsites%2Fdefault%2F...jpg',
+          },
+        },
+        PageListingItem: {
+          type: 'object',
+          properties: {
+            items: { type: 'array', items: { $ref: '#/components/schemas/ListingItem' } },
+            page: { type: 'integer', minimum: 0 },
+            hasNext: { type: 'boolean' },
+            totalPages: { type: 'integer', minimum: 1 },
+          },
+        },
+        Links: {
+          type: 'object',
+          properties: {
+            viewer: { type: 'string', format: 'uri' },
+            listByUrl: { type: 'string', format: 'uri' },
+            raw: { type: 'string', format: 'uri' },
+            previewFirstItem: { type: 'string', format: 'uri', nullable: true },
+            listSelf: { type: 'string', format: 'uri', nullable: true },
+          },
+        },
+        SortingOption: {
+          type: 'object',
+          properties: {
+            value: { type: 'string' },
+            label: { type: 'string' },
+            selected: { type: 'boolean' },
+          },
+        },
+        SortingSelect: {
+          type: 'object',
+          properties: {
+            name: { type: 'string' },
+            label: { type: 'string' },
+            options: { type: 'array', items: { $ref: '#/components/schemas/SortingOption' } },
+          },
+        },
+        ExposedSorting: {
+          type: 'object',
+          properties: {
+            hasSorting: { type: 'boolean' },
+            actionPath: { type: 'string' },
+            sort_by: { $ref: '#/components/schemas/SortingSelect' },
+            sort_order: { $ref: '#/components/schemas/SortingSelect' },
+            filters: { type: 'array', items: { $ref: '#/components/schemas/SortingSelect' } },
+          },
+        },
+        ListResponse: {
+          allOf: [
+            { $ref: '#/components/schemas/PageListingItem' },
+            {
+              type: 'object',
+              properties: {
+                sorting: { $ref: '#/components/schemas/ExposedSorting' },
+                links: { $ref: '#/components/schemas/Links' },
+                sourceUrl: { type: 'string', format: 'uri' },
+              },
+            },
+          ],
+        },
+        ResolveResponse: {
+          type: 'object',
+          properties: {
+            route: {
+              type: 'string',
+              enum: ['viewer', 'redirect', 'list', 'unknown'],
+            },
+            data: { type: 'object', additionalProperties: true, nullable: true },
+            links: { $ref: '#/components/schemas/Links' },
+          },
+          example: {
+            route: 'viewer',
+            data: {
+              title: 'Genshin Impact - Others',
+              recommendations: [{ title: '...', url: '...', proxiedThumb: '/img?url=...' }],
+            },
+            links: {
+              viewer: '/viewer.html?url=...',
+              listByUrl: '/api/list?url=...',
+              raw: '/raw?url=...',
+            },
+          },
+        },
+        SearchResponse: {
+          allOf: [
+            { $ref: '#/components/schemas/PageListingItem' },
+            {
+              type: 'object',
+              properties: {
+                route: { type: 'string', example: 'search' },
+                query: { type: 'string' },
+                links: { type: 'object', properties: { listSelf: { type: 'string' } } },
+              },
+            },
+          ],
+        },
+        Post: {
+          type: 'object',
+          properties: {
+            url: { type: 'string' },
+            title: { type: 'string' },
+            description: { type: 'string', nullable: true },
+            tags: { type: 'array', items: { type: 'string' } },
+            images: { type: 'array', items: { type: 'string' } },
+            videos: { type: 'array', items: { type: 'string' } },
+            thumb: { type: 'string', nullable: true },
+            recommendations: { type: 'array', items: { $ref: '#/components/schemas/ListingItem' } },
+          },
+        },
+        UpdatesResponse: {
+          type: 'object',
+          properties: {
+            view_name: { type: 'string' },
+            items: { type: 'array', items: { $ref: '#/components/schemas/ListingItem' } },
+          },
+        },
+      },
+    },
     paths: {
       '/api/resolve': {
-        get: { summary: 'Smart resolve', responses: { 200: { description: 'OK' } } },
+        get: {
+          tags: ['Resolve'],
+          operationId: 'resolveSmart',
+          summary: 'Smart resolve URL/path',
+          parameters: [
+            { $ref: '#/components/parameters/UrlParam' },
+            { $ref: '#/components/parameters/PathParam' },
+          ],
+          responses: {
+            200: {
+              description: 'OK',
+              content: {
+                'application/json': { schema: { $ref: '#/components/schemas/ResolveResponse' } },
+              },
+            },
+            400: { description: 'missing ?url or ?path' },
+          },
+        },
       },
-      '/api/list': { get: { summary: 'List', responses: { 200: { description: 'OK' } } } },
-      '/api/search': { get: { summary: 'Search', responses: { 200: { description: 'OK' } } } },
-      '/api/post': { get: { summary: 'Get post', responses: { 200: { description: 'OK' } } } },
-      '/api/updates': { get: { summary: 'Updates', responses: { 200: { description: 'OK' } } } },
-      '/api/alphabet/letters': {
-        get: { summary: 'Alphabet letters', responses: { 200: { description: 'OK' } } },
+      '/api/list': {
+        get: {
+          tags: ['Listings'],
+          operationId: 'list',
+          summary: 'List items by path or URL',
+          description:
+            'Если path="/", вернёт витрину latest. Любые доп. query параметры проксируются как exposed-filters (sort_by, sort_order и т.д.).',
+          parameters: [
+            { $ref: '#/components/parameters/UrlParam' },
+            { $ref: '#/components/parameters/PathParam' },
+            { $ref: '#/components/parameters/PageParam' },
+            { $ref: '#/components/parameters/LetterParam' },
+            {
+              name: 'sort_by',
+              in: 'query',
+              schema: { type: 'string' },
+              description: 'Exposed sort_by из Drupal Views (если доступно).',
+            },
+            {
+              name: 'sort_order',
+              in: 'query',
+              schema: { type: 'string', enum: ['ASC', 'DESC', 'asc', 'desc'] },
+              description: 'Exposed sort_order из Drupal Views (если доступно).',
+            },
+          ],
+          responses: {
+            200: {
+              description: 'OK',
+              content: {
+                'application/json': { schema: { $ref: '#/components/schemas/ListResponse' } },
+              },
+            },
+          },
+        },
       },
-      '/api/alphabet/items': {
-        get: { summary: 'Alphabet items', responses: { 200: { description: 'OK' } } },
+      '/api/search': {
+        get: {
+          tags: ['Search'],
+          operationId: 'search',
+          summary: 'Fulltext search',
+          parameters: [
+            { $ref: '#/components/parameters/QParam' },
+            { $ref: '#/components/parameters/PageParam' },
+          ],
+          responses: {
+            200: {
+              description: 'OK',
+              content: {
+                'application/json': { schema: { $ref: '#/components/schemas/SearchResponse' } },
+              },
+            },
+          },
+        },
+      },
+      '/api/post': {
+        get: {
+          tags: ['Posts'],
+          operationId: 'getPost',
+          summary: 'Get post by URL or slug',
+          parameters: [
+            { $ref: '#/components/parameters/SlugOrUrl' },
+            { $ref: '#/components/parameters/SlugParam' },
+          ],
+          responses: {
+            200: {
+              description: 'OK',
+              content: { 'application/json': { schema: { $ref: '#/components/schemas/Post' } } },
+            },
+            400: { description: 'missing ?url or ?slug' },
+          },
+        },
+      },
+      '/api/updates': {
+        get: {
+          tags: ['Updates'],
+          operationId: 'updates',
+          summary: 'Fetch updates (Views)',
+          parameters: [
+            {
+              name: 'view_name',
+              in: 'query',
+              schema: {
+                type: 'string',
+                enum: [
+                  'new_mini',
+                  'user_upload_front',
+                  'updated_manga',
+                  'updated_manga_promoted',
+                  'updated_games',
+                  'random_top_comics',
+                  'top_random_characters',
+                ],
+              },
+              description: 'Имя витрины (Drupal View).',
+            },
+            { $ref: '#/components/parameters/PageParam' },
+          ],
+          responses: {
+            200: {
+              description: 'OK',
+              content: {
+                'application/json': { schema: { $ref: '#/components/schemas/UpdatesResponse' } },
+              },
+            },
+          },
+        },
+      },
+      '/img': {
+        get: {
+          tags: ['Utils'],
+          operationId: 'proxyImage',
+          summary: 'Image proxy',
+          parameters: [{ $ref: '#/components/parameters/MediaUrlParam' }],
+          responses: {
+            200: {
+              description: 'Streamed image',
+              content: {
+                'image/avif': { schema: { type: 'string', format: 'binary' } },
+                'image/webp': { schema: { type: 'string', format: 'binary' } },
+                'image/png': { schema: { type: 'string', format: 'binary' } },
+                'image/jpeg': { schema: { type: 'string', format: 'binary' } },
+                'application/octet-stream': { schema: { type: 'string', format: 'binary' } },
+              },
+            },
+            400: { description: 'missing ?url' },
+          },
+        },
+      },
+      '/vid': {
+        get: {
+          tags: ['Utils'],
+          operationId: 'proxyVideo',
+          summary: 'Video proxy (range supported)',
+          parameters: [{ $ref: '#/components/parameters/MediaUrlParam' }],
+          responses: {
+            200: {
+              description: 'Streamed video',
+              content: {
+                'video/mp4': { schema: { type: 'string', format: 'binary' } },
+                '*/*': { schema: { type: 'string', format: 'binary' } },
+              },
+            },
+            400: { description: 'Missing url' },
+          },
+        },
+      },
+      '/raw': {
+        get: {
+          tags: ['Utils'],
+          operationId: 'raw',
+          summary: 'Fetch raw upstream content',
+          parameters: [{ $ref: '#/components/parameters/MediaUrlParam' }],
+          responses: {
+            200: {
+              description: 'OK',
+              content: {
+                'text/html': { schema: { type: 'string' } },
+                'text/plain': { schema: { type: 'string' } },
+                'application/json': { schema: { type: 'string' } },
+              },
+            },
+            400: { description: 'missing ?url' },
+          },
+        },
       },
       '/viewer.html': {
         get: {
-          summary: 'Static viewer (client-side)',
+          tags: ['HTML'],
+          summary: 'Static viewer page',
           responses: { 200: { description: 'text/html' } },
         },
       },
       '/hub': {
-        get: { summary: 'HTML hub preview', responses: { 200: { description: 'text/html' } } },
+        get: {
+          tags: ['HTML'],
+          summary: 'Hub page (HTML)',
+          parameters: [
+            { $ref: '#/components/parameters/UrlParam' },
+            { $ref: '#/components/parameters/PathParam' },
+          ],
+          responses: {
+            200: { description: 'text/html' },
+            302: { description: 'Redirect to /hub?path=...' },
+          },
+        },
       },
-      '/img': {
-        get: { summary: 'Image proxy', responses: { 200: { description: 'Streamed image' } } },
+      '/search': {
+        get: {
+          tags: ['HTML'],
+          summary: 'Search page (HTML)',
+          parameters: [
+            { $ref: '#/components/parameters/QParam' },
+            { $ref: '#/components/parameters/PageParam' },
+          ],
+          responses: { 200: { description: 'text/html' } },
+        },
       },
-      '/vid': {
-        get: { summary: 'Video proxy', responses: { 200: { description: 'Streamed video' } } },
+      '/health': {
+        get: { tags: ['Utils'], summary: 'Liveness', responses: { 200: { description: 'OK' } } },
       },
-      '/raw': { get: { summary: 'Fetch raw content', responses: { 200: { description: 'OK' } } } },
-      '/health': { get: { summary: 'Liveness', responses: { 200: { description: 'OK' } } } },
-      '/ready': { get: { summary: 'Readiness', responses: { 200: { description: 'OK' } } } },
+      '/ready': {
+        get: { tags: ['Utils'], summary: 'Readiness', responses: { 200: { description: 'OK' } } },
+      },
     },
   };
+
   res.json(openapi);
 });
+
 app.use(
   '/docs',
   swaggerUi.serve,
-  swaggerUi.setup(undefined, { swaggerOptions: { url: '/openapi.json' } }),
+  swaggerUi.setup(undefined, {
+    swaggerOptions: {
+      url: '/openapi.json',
+      deepLinking: true,
+      displayRequestDuration: true,
+      docExpansion: 'none',
+      defaultModelExpandDepth: 2,
+      defaultModelsExpandDepth: 1,
+    },
+    customSiteTitle: 'Multporn Dev Server — Swagger UI',
+  }),
 );
 
 app.use((err, req, res, _next) => {

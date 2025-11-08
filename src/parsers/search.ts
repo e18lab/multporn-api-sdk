@@ -18,7 +18,8 @@ export function parseSearch(html: string, baseURL: string, page: number): Page<L
     })
     .first();
 
-  view.find('.view-content .views-row').each((_, el) => {
+  const rows = view.find('.view-content .views-row');
+  rows.each((_, el) => {
     const row = $(el);
 
     const a = row.find('.views-field-title a[href]').first().length
@@ -27,20 +28,25 @@ export function parseSearch(html: string, baseURL: string, page: number): Page<L
 
     const href = a.attr('href') || '';
     const url = toAbsolute(baseURL, href);
-
     const title = (a.text() || row.find('.views-field-title .field-content').text() || '').trim();
 
-    const img = row.find('.views-field-field-preview img').first().length
+    const pickImg = row.find('.views-field-field-preview img').first().length
       ? row.find('.views-field-field-preview img').first()
       : row.find('.views-field-field-image img').first().length
         ? row.find('.views-field-field-image img').first()
         : row.find('.views-field-field-fl-prev img').first().length
           ? row.find('.views-field-field-fl-prev img').first()
-          : row.find('.views-field-field-avatar img').first().length
-            ? row.find('.views-field-field-avatar img').first()
-            : row.find('img').first();
+          : row.find('.views-field-field-album-preview img').first().length
+            ? row.find('.views-field-field-album-preview img').first()
+            : row.find('.views-field-field-vd-preciew img').first().length
+              ? row.find('.views-field-field-vd-preciew img').first()
+              : row.find('.views-field-field-gif-pre img').first().length
+                ? row.find('.views-field-field-gif-pre img').first()
+                : row.find('.views-field-field-avatar img').first().length
+                  ? row.find('.views-field-field-avatar img').first()
+                  : row.find('img').first();
 
-    let thumb = img.attr('data-src') || img.attr('src') || undefined;
+    let thumb = pickImg.attr('data-src') || pickImg.attr('src') || undefined;
     thumb = toAbsolute(baseURL, thumb);
 
     if (url && title) items.push({ title, url, thumb });

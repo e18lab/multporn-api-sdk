@@ -153,9 +153,12 @@ class AppHeader extends HTMLElement {
 
       {
         label: 'Search',
-        href: '/search-old',
+        href: '/search',
         external: true,
-        sub: [{ label: 'Sort comics', href: '/viewer?path=/sort_comics' }],
+        sub: [
+          { label: 'Search old', href: '/search-old' },
+          { label: 'Sort comics', href: '/viewer?path=/sort_comics' },
+        ],
       },
     ];
 
