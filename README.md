@@ -9,9 +9,9 @@
 ## Installation
 
 ```bash
-yarn add @e18lab/multporn-api
+yarn add multporn-api-sdk
 # or
-npm i @e18lab/multporn-api
+npm i multporn-api-sdk
 ````
 
 Node v24.11.0 is required.
