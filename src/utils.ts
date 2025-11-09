@@ -69,7 +69,7 @@ export function guessAlphabetSectionFromPath(path: string): string {
     category_comic: 'alphabetical_order_category_comic',
     authors_comics: 'alphabetical_order_authors_comics',
     authors_hentai: 'alphabetical_order_authors_hentai',
-    pipictures: 'alphabetical_order_pipictures',
+    pipictures: 'alphabetical_order_pipictures'
   };
   return map[slug] || (slug ? `alphabetical_order_${slug}` : 'alphabetical_order');
 }

@@ -5,14 +5,14 @@ import { parseAlphabetLetters, parseAlphabetListing } from '../parsers/alphabet'
 type Cfg = { hubPath: string; alphaPrefix: string };
 
 const ALPHA_CFG: Record<string, Cfg> = {
-  comics: { hubPath: '/comic', alphaPrefix: '/alphabetical_order_comics' },
-  category_comic: { hubPath: '/category_comic', alphaPrefix: '/category_comic/alphabetical' },
-  characters: { hubPath: '/characters', alphaPrefix: '/alphabetical_order_characters' },
-  authors_comics: { hubPath: '/authors_comics', alphaPrefix: '/alphabetical_order_authors' },
-  pipictures: { hubPath: '/pipictures', alphaPrefix: '/alphabetical_order_pictures' },
-  porn_gifs: { hubPath: '/porn_gifs', alphaPrefix: '/alphabetical_order_gif' },
-  manga: { hubPath: '/munga', alphaPrefix: '/alphabetical_order_manga' },
-  authors_hentai: { hubPath: '/authors_hentai', alphaPrefix: '/authors_hentai/alphabetical' },
+  comics:          { hubPath: '/comic',           alphaPrefix: '/alphabetical_order_comics' },
+  category_comic:  { hubPath: '/category_comic',  alphaPrefix: '/category_comic/alphabetical' },
+  characters:      { hubPath: '/characters',      alphaPrefix: '/alphabetical_order_characters' },
+  authors_comics:  { hubPath: '/authors_comics',  alphaPrefix: '/alphabetical_order_authors' },
+  pipictures:      { hubPath: '/pipictures',      alphaPrefix: '/alphabetical_order_pictures' },
+  porn_gifs:       { hubPath: '/porn_gifs',       alphaPrefix: '/alphabetical_order_gif' },
+  manga:           { hubPath: '/munga',           alphaPrefix: '/alphabetical_order_manga' },
+  authors_hentai:  { hubPath: '/authors_hentai',  alphaPrefix: '/authors_hentai/alphabetical' },
 };
 
 export async function alphabetLetters(

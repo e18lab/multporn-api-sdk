@@ -5,7 +5,6 @@ export function parseExposedSorting(html: string, baseURL: string): SortingUI | 
   const vfIdx = html.search(/<div[^>]+class=["'][^"']*view-filters[^"']*["'][^>]*>/i);
   if (vfIdx < 0) return undefined;
 
-  // Найдём форму внутри блока view-filters
   const formStart = html.indexOf('<form', vfIdx);
   if (formStart < 0) return undefined;
   const formEnd = html.indexOf('</form>', formStart);
@@ -30,7 +29,10 @@ export function parseExposedSorting(html: string, baseURL: string): SortingUI | 
   let lm: RegExpExecArray | null;
   while ((lm = reLabel.exec(formHtml))) {
     const id = lm[1];
-    const raw = (lm[2] || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    const raw = (lm[2] || '')
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
     if (id && raw) labels.set(id, raw);
   }
 
@@ -52,7 +54,10 @@ export function parseExposedSorting(html: string, baseURL: string): SortingUI | 
     let om: RegExpExecArray | null;
     while ((om = reOpt.exec(inner))) {
       const oattrs = om[1] || '';
-      const text = (om[2] || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+      const text = (om[2] || '')
+        .replace(/<[^>]*>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
       const val = /(?:^|\s)value=["']([^"']*)["']/i.exec(oattrs)?.[1] ?? text;
       const selected = /\bselected\b/i.test(oattrs) || /\bselected=["']selected["']/i.test(oattrs);
       options.push({ value: val, label: text || val, selected });

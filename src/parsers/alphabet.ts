@@ -1,4 +1,4 @@
-import * as cheerio from 'cheerio';
+import * as cheerio from 'cheerio/slim';
 import type { AnyNode, Element } from 'domhandler';
 import { normSpace, parseIntLike, toAbsolute } from '../utils';
 import type { AlphabetLetter, AlphabetBlock, ListingItem, Page } from '../types';

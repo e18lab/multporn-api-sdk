@@ -1,4 +1,4 @@
-import * as cheerio from 'cheerio';
+import * as cheerio from 'cheerio/slim';
 import { Post } from '../types';
 import { toAbsolute, uniq } from '../utils';
 

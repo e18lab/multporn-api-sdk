@@ -1,5 +1,4 @@
-import * as cheerio from 'cheerio';
-import type { Cheerio } from 'cheerio';
+import * as cheerio from 'cheerio/slim';
 import { ListingItem, ViewName } from '../types';
 import { toAbsolute } from '../utils';
 
@@ -11,7 +10,7 @@ export function parseViewDisplay(
   const $ = cheerio.load(html);
   const items: ListingItem[] = [];
 
-  const pickThumb = (scope: Cheerio<any>) => {
+  const pickThumb = (scope: cheerio.Cheerio<any>) => {
     const img = scope.find('.views-field-field-preview img').first().length
       ? scope.find('.views-field-field-preview img').first()
       : scope.find('.views-field-field-image img').first().length

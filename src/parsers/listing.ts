@@ -1,4 +1,4 @@
-import * as cheerio from 'cheerio';
+import * as cheerio from 'cheerio/slim';
 import { toAbsolute } from '../utils';
 import type { ListingItem, Page } from '../types';
 import { extractTotalPages } from './pagination';

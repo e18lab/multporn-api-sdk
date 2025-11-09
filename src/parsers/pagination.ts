@@ -1,4 +1,4 @@
-import * as cheerio from 'cheerio';
+import * as cheerio from 'cheerio/slim';
 
 function pageIndexFromParam(raw?: string | null): number | null {
   if (!raw) return null;

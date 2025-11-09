@@ -1,4 +1,4 @@
-import * as cheerio from 'cheerio';
+import * as cheerio from 'cheerio/slim';
 
 export function extractViewsContextForSearch(html: string): {
   view_name: string;

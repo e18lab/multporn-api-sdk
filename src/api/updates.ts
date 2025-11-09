@@ -78,6 +78,7 @@ export async function updates(
           break;
         }
       } catch {
+        // продолжим перебирать кандидатов
       }
     }
   }
