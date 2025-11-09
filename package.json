@@ -1,6 +1,6 @@
 {
   "name": "multporn-api-sdk",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "Unofficial Multporn HTML scraping SDK Node. Typed, with retries/timeouts.",
   "license": "MIT",
   "author": "Maks1mio",
@@ -22,8 +22,11 @@
     "node": ">=18"
   },
   "scripts": {
-    "start": "node examples/server/index.mjs",
+    "start": "node examples/dev-server.mjs",
     "build": "tsup",
+    "pack" : "npm pack",
+    "yarn:publish" : "yarn publish --access public",
+    "npm:publish" : "npm publish --access public",
     "prepare": "npm run build",
     "test": "vitest run",
     "dev:test": "vitest",
