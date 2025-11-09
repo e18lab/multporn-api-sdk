@@ -1,6 +1,6 @@
 {
   "name": "multporn-api-sdk",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Unofficial Multporn HTML scraping SDK for Node/Web and React Native (Expo). Typed, with retries/timeouts.",
   "license": "MIT",
   "author": "Maks1mio",
